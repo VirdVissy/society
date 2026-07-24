@@ -46,7 +46,13 @@ from typing import Any
 from lamarck.asserts import LMK_ASSERT
 from lamarck.contracts import GenParams, GenResult, ModelBackendP, ModelSection
 
-__all__ = ["MlxBackend", "ScriptedBackend", "make_backend", "sanitize_model_text"]
+__all__ = [
+    "AnthropicBackend",
+    "MlxBackend",
+    "ScriptedBackend",
+    "make_backend",
+    "sanitize_model_text",
+]
 
 _NUL = "\x00"
 _SURROGATE_LO = 0xD800
@@ -169,6 +175,78 @@ class MlxBackend:
         )
 
 
+class AnthropicBackend:
+    """Cloud generation through the Anthropic API (optional ``[api]`` extra).
+
+    Same envelope contract as :class:`MlxBackend`; the sim's determinism is
+    unaffected because determinism is record/replay — the committed LLM_CALL
+    response is the truth, and replay never re-calls any backend. Usage is
+    the API's own billing counts (``usage.input_tokens`` /
+    ``usage.output_tokens``), so qi cost equals real spend.
+
+    Per-model request rules (the 4.7+/Sonnet-5 API surface rejects
+    non-default sampling and runs adaptive thinking by default; older tiers
+    accept temperature and have no thinking unless asked):
+
+    - ``temperature`` is passed as ``temp_permille / 1000`` ONLY for models
+      outside ``_NO_SAMPLING_PREFIXES``; for those models it is omitted.
+    - ``thinking: {"type": "disabled"}`` is passed ONLY for models in
+      ``_DISABLE_THINKING_PREFIXES`` (adaptive-by-default tiers that accept
+      an explicit disable). Fable-tier models reject explicit disable and
+      are not intended targets here.
+    - ``GenParams.seed`` is inert (the API has no sampling seed); it is
+      still recorded in the LLM_CALL payload for uniformity.
+
+    Empty or truncated responses (refusal / max_tokens stop reasons) come
+    back as ordinary text for the runner's parse-retry-forfeit protocol —
+    no special-casing, no policy here. The client retries 429/5xx itself
+    (``max_retries=5``) which only affects wall-clock, never content.
+    """
+
+    _NO_SAMPLING_PREFIXES = (
+        "claude-sonnet-5",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-fable",
+    )
+    _DISABLE_THINKING_PREFIXES = ("claude-sonnet-5",)
+
+    def __init__(self, model_id: str) -> None:
+        anthropic = importlib.import_module("anthropic")  # lazy: optional [api] extra
+        # Zero-arg client: credentials resolve from the environment
+        # (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / an `ant auth login`
+        # profile). Never hardcode or log a key.
+        self._client: Any = anthropic.Anthropic(max_retries=5)
+        self.model_id = model_id
+
+    def generate(self, prompt: str, params: GenParams) -> GenResult:
+        envelope = json.loads(prompt)
+        LMK_ASSERT(
+            isinstance(envelope, dict) and set(envelope) == {"system", "template", "user"},
+            "prompt is not the canonical envelope {system, template, user}",
+            got=str(prompt)[:120],
+        )
+        request: dict[str, Any] = {
+            "model": self.model_id,
+            "max_tokens": params.max_tokens,
+            "system": envelope["system"],
+            "messages": [{"role": "user", "content": envelope["user"]}],
+        }
+        if not self.model_id.startswith(self._NO_SAMPLING_PREFIXES):
+            request["temperature"] = params.temp_permille / 1000  # API boundary only
+        if self.model_id.startswith(self._DISABLE_THINKING_PREFIXES):
+            request["thinking"] = {"type": "disabled"}
+        response = self._client.messages.create(**request)
+        text = "".join(
+            block.text for block in response.content if getattr(block, "type", "") == "text"
+        )
+        return GenResult(
+            text=text,
+            usage_in=int(response.usage.input_tokens),
+            usage_out=int(response.usage.output_tokens),
+        )
+
+
 def make_backend(section: ModelSection) -> ModelBackendP:
     """Construct the backend named by ``[model].backend``.
 
@@ -185,9 +263,15 @@ def make_backend(section: ModelSection) -> ModelBackendP:
         )
     if section.backend == "mlx":
         return MlxBackend(section.model_id)
-    raise ValueError(f"unknown model backend: {section.backend!r} (expected 'mlx' or 'scripted')")
+    if section.backend == "anthropic":
+        return AnthropicBackend(section.model_id)
+    raise ValueError(
+        f"unknown model backend: {section.backend!r} (expected 'mlx', 'anthropic' or 'scripted')"
+    )
 
 
-def _proves_protocol(scripted: ScriptedBackend, mlx: MlxBackend) -> tuple[ModelBackendP, ...]:
-    """Compile-time (mypy) proof that both backends satisfy ModelBackendP."""
-    return (scripted, mlx)
+def _proves_protocol(
+    scripted: ScriptedBackend, mlx: MlxBackend, api: AnthropicBackend
+) -> tuple[ModelBackendP, ...]:
+    """Compile-time (mypy) proof that all backends satisfy ModelBackendP."""
+    return (scripted, mlx, api)

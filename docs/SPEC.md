@@ -224,6 +224,20 @@ the build waves:
 - **Config fingerprints**: the Phase-0 `config_sha` of `configs/world.toml`
   is regression-pinned (`24cbbf0e…`); live runs fingerprint the extended
   model via `live_config_sha` (valley golden `3723764d…`).
+- **Cloud backend** (ratified at the user's request): `model.backend =
+  "anthropic"` serves generation from the Anthropic API. The "no network in
+  the sim loop" rule is refined to its actual intent: *agents* may never
+  initiate network actions; model inference may be local (mlx) or cloud
+  (anthropic) — the hash-chained response cache remains the sole
+  determinism mechanism either way, and deep replay never re-calls any
+  backend. Usage in LLM_CALL payloads is the API's own billing counts, so
+  qi cost equals real spend. `GenParams.seed` is recorded but inert on the
+  API (no sampling seed exists); `temperature` is sent only to models that
+  accept non-default sampling (e.g. Haiku 4.5), and thinking is explicitly
+  disabled on adaptive-by-default tiers (e.g. Sonnet 5). Keys come from the
+  environment only — never config, never logs, never payloads. Weight-level
+  phases (3+) still require local models for the trainable population; the
+  mlx path stays first-class.
 
 ## 9. Deviations from PLAN.md §3 (recorded, deliberate)
 

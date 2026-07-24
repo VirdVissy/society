@@ -20,7 +20,7 @@ engine-owned checks on the live sections:
 
   4. ``live.locations`` must be non-empty (pydantic ``min_length=1``) with
      unique, non-empty-string entries.
-  5. ``model.backend`` must be one of ``{"mlx", "scripted"}``.
+  5. ``model.backend`` must be one of ``{"mlx", "anthropic", "scripted"}``.
   6. ``universe.seed`` must be a hex u64, exactly like ``world.master_seed``
      (the two seeds are independent by design; the format rule is shared).
   7. ``live.first_discovery_multiplier >= 1`` is enforced by the contracts
@@ -52,7 +52,7 @@ from typing import Any
 from lamarck.contracts import ActionType, LiveWorldConfig, WorldConfig
 
 _U64_BOUND = 1 << 64
-_LIVE_BACKENDS = frozenset({"mlx", "scripted"})
+_LIVE_BACKENDS = frozenset({"mlx", "anthropic", "scripted"})
 
 
 def _check_action_costs_exact(data: dict[str, Any]) -> None:

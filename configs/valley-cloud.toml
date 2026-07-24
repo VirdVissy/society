@@ -1,0 +1,57 @@
+# lamarck live world config — Phase 1, cloud inference variant.
+# Identical world to valley.toml; only [model] differs: the thinking happens
+# on the Anthropic API instead of local mlx. Determinism is unchanged
+# (record/replay via the hash-chained response cache). Requires the [api]
+# extra and ANTHROPIC_API_KEY in the environment.
+# All quantities integers; fractions are permille. No floats, ever.
+
+[world]
+name = "wuxing-valley"
+master_seed = "0xDE5EEDDE5EEDDE5E"
+days = 30
+rounds_per_day = 8
+ticks_per_agent_per_round = 1
+
+[population]
+founders = 8
+
+[qi]
+qi_max = 1200000
+daily_allowance = 30000
+
+[qi.action_costs]
+experiment = 200
+converse = 0
+teach = 100
+study = 50
+trade = 50
+note = 0
+travel = 500
+meditate = 50
+challenge = 100
+attempt_breakthrough = 200
+rest = 0
+
+[economy]
+starting_stones = 20
+bounties = [10, 25, 60, 150, 400]
+materials = [1, 2, 5, 12, 30]
+stub_success_permille = [500, 250, 120, 50, 15]  # unused in live mode; schema-required
+
+[model]
+backend = "anthropic"
+model_id = "claude-haiku-4-5"     # society tier; see devlog 002 for the cost table
+max_tokens = 220
+reflection_max_tokens = 160
+temp_permille = 700               # passed as temperature on models that accept it
+seed = 3735928559                 # recorded in LLM_CALL payloads; inert on the API
+prompt_budget_chars = 14000
+
+[universe]
+name = "wuxing"
+seed = "0x57A57A57A57A57A5"
+tiers = 5
+
+[live]
+locations = ["meadow", "furnace-hall", "cold-spring"]
+first_discovery_multiplier = 3
