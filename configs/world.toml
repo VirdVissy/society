@@ -1,0 +1,36 @@
+# lamarck world config — Phase 0 stub world ("the empty valley")
+# All quantities are integers; fractions are permille. No floats, ever.
+
+[world]
+name = "empty-valley"
+master_seed = "0xDE5EEDDE5EEDDE5E"
+days = 30
+rounds_per_day = 8
+ticks_per_agent_per_round = 1
+
+[population]
+founders = 8
+
+[qi]
+qi_max = 1200000
+daily_allowance = 30000
+
+# Flat per-action qi prices (Phase-0 stand-in for token metering).
+[qi.action_costs]
+experiment = 800
+converse = 600
+teach = 900
+study = 700
+trade = 400
+note = 200
+travel = 500
+meditate = 100
+challenge = 900
+attempt_breakthrough = 1000
+rest = 50
+
+[economy]
+starting_stones = 20
+bounties = [10, 25, 60, 150, 400]
+materials = [1, 2, 5, 12, 30]
+stub_success_permille = [500, 250, 120, 50, 15]

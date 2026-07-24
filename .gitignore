@@ -1,0 +1,19 @@
+# environments / caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# run artifacts (never versioned)
+runs/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# local session config
+.claude/
+.DS_Store
+dist/
