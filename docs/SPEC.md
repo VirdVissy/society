@@ -25,6 +25,15 @@ The only serialized form for anything hashed, stored, or compared.
   platforms, and Python patch versions (property-tested: idempotence and
   parse→re-encode round-trip).
 
+Edge cases the rules above do not pin are **rejected, never guessed at**
+(locked by tests): distinct keys that collide after NFC normalization
+(output would depend on insertion order); strings containing lone
+surrogates; nesting beyond the recursion limit or self-referential
+containers; `bytes`, tuples, sets, plain `Enum`, arbitrary objects,
+non-`str` dict keys. `StrEnum` values encode as their underlying string,
+`IntEnum` as its integer, both via the base type's data (overridden
+`__str__` is bypassed).
+
 Implementation: `lamarck/eventstore/canonical.py`
 (`canonical_bytes`, `sha256_hex`, `CanonicalError`).
 
@@ -46,6 +55,13 @@ hash_i     = sha256_hex( utf8(prev_hash_hex) || canonical_bytes(envelope_i) )
 - `verify_chain` recomputes every hash from genesis and re-canonicalizes every
   payload; any divergence is a hard failure. Tampering with any committed byte
   changes the fingerprint.
+- The store is file-backed only (WAL is asserted; no `:memory:`), single
+  writer. `append` NFC-normalizes actor/payload strings — the **returned**
+  record, not the submitted draft, is committed truth and is what consumers
+  fold. Delta columns are 64-bit; payload integers are arbitrary-precision.
+- Known limit (recorded, accepted): the chain proves integrity and order of
+  what is present, not the absence of tail truncation. External head evidence
+  (`report.json`, the golden pins) is the truncation witness.
 
 ## 3. Event kinds (Phase 0)
 
@@ -62,6 +78,26 @@ hash_i     = sha256_hex( utf8(prev_hash_hex) || canonical_bytes(envelope_i) )
 
 ActionType (11, locked): `experiment, converse, teach, study, trade, note,
 travel, meditate, challenge, attempt_breakthrough, rest`.
+
+**Run event layout** (locked; full normative text in the `lamarck/sim.py`
+module docstring, frozen by the golden fingerprint test):
+`RUN_STARTED` → `AGENT_SPAWNED × N` (spawn order `a1..aN`, day 0 tick 0) →
+per day: `DAY_STARTED`, phase markers at transitions (4/day), ACTION slots
+with affordability checked allowance-then-stones (degraded slots bill REST,
+or nothing plus `free: true` when even REST exceeds the remaining
+allowance; degraded slots never draw from the stub-universe stream), dusk
+deaths in spawn order, periodic difftest → `RUN_FINISHED` (last day, night
+tick) with `final_state_sha` = sha256 of the canonical `LedgerBalances`
+dump. Preamble in its own batch, one batch per day, `RUN_FINISHED` outside
+any batch. `run_id = sha256_hex(config_sha + ":" + master_seed_hex)[:12]`.
+
+**Run directory** (locked): `events.sqlite3` (ground truth), `config.toml`
+(the *effective* config — verbatim source copy, or a synthesized dump
+asserted to round-trip to the same `config_sha` when overrides were
+applied), `report.json` (convenience; strings and ints only, wall time as
+integer ms; keys: `run_id, days_elapsed, events, head_seq, head_hash,
+final_state_sha, wall_ms, alive_count, qi_total, stones_total`; never
+hashed, never read by replay).
 
 ## 4. RNG substreams
 
@@ -82,10 +118,18 @@ stream      = random.Random(stream_seed)
 
 Per day: one `DAWN` world slot → `rounds_per_day` rounds of per-agent `ACTION`
 slots (`ticks_per_agent_per_round` each; order = seeded shuffle of alive
-agents from the `"scheduler"` stream, reshuffled every round) → one `DUSK`
-world slot → one `NIGHT` world slot. Tick indices are contiguous from 0
-within each day. Two runs with identical config and seed produce identical
+agents from the `"scheduler"` stream, exactly one shuffle per round) → one
+`DUSK` world slot → one `NIGHT` world slot. Tick indices are contiguous from
+0 within each day. Two runs with identical config and seed produce identical
 slot sequences.
+
+Locked interpretation details: world slots (dawn/dusk/night) carry
+`round = 0` — the round field is meaningful only on `ACTION` slots. An
+agent's `ticks_per_agent_per_round` ticks are **consecutive** within its
+round. The scheduler stream is stateful across days (one sequence per run,
+never reseeded); the whole day is computed at `iter_day` call time, so stream
+consumption depends only on the call sequence. `alive_ids` is shuffle input:
+callers pass it in spawn order.
 
 ## 6. Phase-0 stub semantics (replaced by real semantics in Phase 1+)
 
@@ -117,15 +161,28 @@ dusk and at run end:
 fails hard with a per-agent diff. This is the sim-ex difftest pattern: the
 value is that the implementations *can* disagree.
 
+Cadence: the fold is a full log re-scan (O(n)), so the runner difftests
+**periodically** (`difftest_interval` days, default 10) and **always at run
+end** — never every dusk on long runs (that would be O(n²)).
+
+Hardening beyond the letter of the contract (locked): a *committed* ACTION
+whose spend exceeds the daily allowance trips an always-on assertion in the
+live ledger — degradation is the producer's job, and a recorded
+over-allowance spend is a producer bug, never silently tolerated. Spawn,
+death, and world events must carry zero deltas. Only negative `qi_delta` on
+`ACTION` events counts as allowance spend.
+
 ## 8. Replay contract
 
 `lamarck replay <run_dir>` must, with no model calls and no wall-clock
-dependence: verify the hash chain from genesis, refold ledgers, recompute
-`final_state_sha`, and compare both the chain head and the state sha against
-the `run_finished` payload. Exit code 0 iff everything matches. A run is
-*reproducible* iff replay passes; the golden test pins the chain head of a
-fixed config+seed so any semantic drift in engine code is caught as a hash
-change.
+dependence: verify the hash chain from genesis, refold ledgers via the
+independent `fold_balances`, recompute `final_state_sha`, and compare both
+the chain head and the state sha against the `run_finished` payload. Exit
+code 0 iff everything matches. Replay's code path has zero model of the
+sim — no Scheduler, no StubPolicy, no RNG — so it cannot share a bug with
+the producer. A run is *reproducible* iff replay passes; the golden test
+pins the chain head of a fixed config+seed so any semantic drift in engine
+code is caught as a hash change.
 
 ## 9. Deviations from PLAN.md §3 (recorded, deliberate)
 
