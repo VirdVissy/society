@@ -372,7 +372,19 @@ def test_fold_matches_live_on_synthetic_history() -> None:
     cfg = _cfg(daily_allowance=5_000)  # 5 rounds x max cost 1000 fits exactly
     events = _synthetic_history(cfg)
     assert len(events) >= 200
-    assert {ev.kind for ev in events} == set(EventKind)  # every kind exercised
+    phase0_kinds = {
+        EventKind.RUN_STARTED,
+        EventKind.DAY_STARTED,
+        EventKind.PHASE_STARTED,
+        EventKind.AGENT_SPAWNED,
+        EventKind.ACTION,
+        EventKind.LEDGER_ADJUST,
+        EventKind.AGENT_DIED,
+        EventKind.RUN_FINISHED,
+    }
+    # Phase-0 generator covers the Phase-0 kinds; Phase-1 kinds (llm_call,
+    # task_attempt, reflection) are exercised by tests/test_ledgers_p1.py.
+    assert {ev.kind for ev in events} == phase0_kinds  # every phase-0 kind exercised
     live = Ledgers(cfg)
     for ev in events:
         live.apply(ev)

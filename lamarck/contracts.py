@@ -44,7 +44,62 @@ match the pinned test vectors in tests/test_rng.py. Canonical stream names in
 Phase 0: "scheduler", "stub-universe", and "agent:{agent_id}".
 
 ========================================================================
-PHASE-0 ACTION SEMANTICS (stub world; replaced by real semantics in Phase 1)
+PHASE-1 LIVE SEMANTICS (additive; the Phase-0 stub path is unchanged and its
+golden fingerprint must keep passing)
+========================================================================
+Qi billing moves to real token usage: every model call appends an LLM_CALL
+event billing ``qi_delta = -qi_llm_cost(usage_in, usage_out)`` where
+``qi_llm_cost = ceil(usage_in / QI_INPUT_DIVISOR) + usage_out`` (thinking
+and speaking cost 4x listening). The daily allowance counts negative qi on
+BOTH ACTION and LLM_CALL events. ACTION events in live mode carry only
+engine-priced surcharges (travel, materials); the thinking is billed on the
+LLM_CALL that produced it.
+
+Model text sanitization (before any payload): lone surrogates -> U+FFFD,
+NULs stripped. The committed (NFC-normalized) record is the truth consumed
+by parsers.
+
+Action protocol: the model must emit one JSON object {"action": <ActionType
+value>, ...args} (optionally inside a ``` fence). On a parse/validation
+failure the runner retries ONCE (MAX_ACTION_PARSE_RETRIES) with an error
+message appended; both calls bill. A second failure forfeits the slot as
+ACTION {"type": "rest", "degraded": true, "reason": "malformed"} billing
+REST's surcharge. Unaffordable actions degrade exactly as in Phase 0.
+
+Live action args (validated; invalid args take the retry path, unaffordable
+takes the degrade path):
+  EXPERIMENT {"task_id", "steps": [[a, b], ...]}  — stones surcharge
+      materials[tier-1]; outcome recorded as a TASK_ATTEMPT event (world-
+      emitted, actor = agent, zero deltas) with step-product evidence;
+      verified success appends LEDGER_ADJUST {"reason": "bounty", "tier"}
+      crediting bounties[tier-1], multiplied by
+      economy.first_discovery_multiplier when first-in-world.
+  CONVERSE {"target", "text"}  — open-air speech: heard by every agent
+      co-located with the speaker at emission (target is addressing flavor).
+      An agent's perception carries the up-to-6 most recent utterances from
+      co-located others with day >= current_day - 1.
+  TRAVEL {"to"}  — must be a configured location != current.
+  TRADE {"target", "stones": > 0}  — target alive and co-located; ACTION
+      debits the actor, engine appends LEDGER_ADJUST
+      {"reason": "trade", "from": actor} crediting the target.
+  NOTE {"text"}  — private memory, <= NOTE_MAX_CHARS chars.
+  TEACH/STUDY/CHALLENGE/ATTEMPT_BREAKTHROUGH/MEDITATE/REST {} — Phase-1
+      flavor no-ops (billed; real semantics arrive in Phases 2-4).
+
+Dusk (live): each living agent, in spawn order, produces one REFLECTION
+event ({"text"}, zero deltas; its LLM_CALL bills) — the rolling
+self-summary fed to the next day's prompts. Deaths are checked after
+reflections.
+
+Determinism: prompts are pure functions of event-log-derived state
+(PerceptionView) rendered by a versioned template; prompt_sha256 goes into
+the LLM_CALL payload, full prompt text into an UNHASHED side table. Replay
+modes: verify (chain + refold + universe re-verification) and deep
+(re-execute the runner against the recorded LLM_CALL stream, asserting each
+prompt_sha and reproducing the identical chain head).
+
+========================================================================
+PHASE-0 ACTION SEMANTICS (stub world; unchanged, still exercised by tests)
 ========================================================================
 Actions cost flat qi per ActionType (config [qi.action_costs]) — the stand-in
 for token metering. Additional rules:
@@ -93,6 +148,10 @@ class EventKind(StrEnum):
     LEDGER_ADJUST = "ledger_adjust"
     AGENT_DIED = "agent_died"
     RUN_FINISHED = "run_finished"
+    # Phase 1 (appended; never reorder — the pin test locks the sequence)
+    LLM_CALL = "llm_call"
+    TASK_ATTEMPT = "task_attempt"
+    REFLECTION = "reflection"
 
 
 class DayPhase(StrEnum):
@@ -265,6 +324,205 @@ class StubView(BaseModel):
 
 TickSlot = tuple[DayPhase, int, int, str]  # (phase, round, tick, actor_id); world slots actor=""
 
+
+# ======================================================================
+# PHASE 1 — live-world contracts (additive; Phase-0 surface above is frozen)
+# ======================================================================
+
+QI_INPUT_DIVISOR = 4  # listening is 4x cheaper than thinking/speaking
+MAX_ACTION_PARSE_RETRIES = 1  # one billed retry, then forfeit
+NOTE_MAX_CHARS = 500
+
+
+def qi_llm_cost(usage_in: int, usage_out: int) -> int:
+    """The one true qi price of a model call: ceil(in/4) + out (contract)."""
+    return -(-usage_in // QI_INPUT_DIVISOR) + usage_out
+
+
+class GenParams(BaseModel):
+    """Sampling parameters — integers only (permille), part of the hashed
+    LLM_CALL payload and of the response-cache identity."""
+
+    model_config = ConfigDict(frozen=True)
+
+    max_tokens: int = Field(ge=1)
+    temp_permille: int = Field(ge=0, le=2000)
+    seed: int = Field(ge=0)
+
+
+class GenResult(BaseModel):
+    """What a backend returns. ``text`` is raw (the runner sanitizes:
+    lone surrogates -> U+FFFD, NULs stripped) ; usage is true token counts
+    (scripted backends synthesize ceil(len/4))."""
+
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+    usage_in: int = Field(ge=0)
+    usage_out: int = Field(ge=0)
+
+
+class ModelBackendP(Protocol):
+    """A text generator. Implementations: MlxBackend (real, lazy import),
+    ScriptedBackend (deterministic, CI), CachedBackend (deep replay —
+    serves recorded LLM_CALL events in order, asserting prompt_sha)."""
+
+    def generate(self, prompt: str, params: GenParams) -> GenResult: ...
+
+
+# ------------------------------------------------------------- universe API
+
+
+class TaskStub(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    task_id: str
+    tier: int = Field(ge=1, le=5)
+    title: str  # e.g. 'produce "cinnabar-ash"'
+
+
+class Submission(BaseModel):
+    """An alchemy procedure: ordered pairwise combinations. Step i may use
+    base elements and any product of steps < i."""
+
+    model_config = ConfigDict(frozen=True)
+
+    steps: list[list[str]]  # each inner list has exactly 2 entries (validated by the universe)
+
+
+class Outcome(BaseModel):
+    """Deterministic verification result. ``step_products`` is the evidence
+    trail (what each combination yielded — informative even on failure;
+    this is what makes experimentation learnable and teachable)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    verified: bool
+    product: str  # final product ("slag" on a dead-end combination)
+    tier: int = Field(ge=0)  # tier of the attempted task
+    step_products: list[str]
+    message: str  # in-fiction, deterministic
+
+
+class UniverseManifest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    name: str
+    tiers: int = Field(ge=1)
+    compounds: int = Field(ge=1)
+    universe_seed: str  # hex
+
+
+class AuditReport(BaseModel):
+    """oracle_audit output: proves the world is worth simulating BEFORE a
+    run burns a night. ok=False must fail `lamarck audit` loudly."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ok: bool
+    reachable_tiers: list[int]
+    compounds_by_tier: dict[str, int]  # str keys (canonical-JSON rule)
+    min_steps: dict[str, int]  # compound -> minimal step count
+    notes: list[str]
+
+
+class UniverseP(Protocol):
+    """A problem domain with an instant, incorruptible, DETERMINISTIC
+    verifier. Hidden rules must never appear in any prompt. ``attempt`` is a
+    pure function of (task_id, submission) — Phase 1 universes take no rng
+    (deviation from PLAN §3.4, determinism-first; recorded in SPEC)."""
+
+    def manifest(self) -> UniverseManifest: ...
+    def tasks(self, tier: int) -> list[TaskStub]: ...
+    def attempt(self, task_id: str, submission: Submission) -> Outcome: ...
+    def oracle_audit(self) -> AuditReport: ...
+
+
+# ------------------------------------------------- perception and personas
+
+
+class PersonaCard(BaseModel):
+    """Immutable birth identity, loaded from personas/*.toml."""
+
+    model_config = ConfigDict(frozen=True)
+
+    agent_id: str
+    name: str
+    temperament: str
+    values: list[str]
+    quirks: list[str]
+    speech_style: str
+
+
+class HeardUtterance(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    from_agent: str
+    from_name: str
+    text: str
+
+
+class PerceptionView(BaseModel):
+    """Everything a live agent may condition on at one tick — the
+    determinism boundary. The prompt builder renders EXACTLY this (plus the
+    versioned template) and nothing else; the runner assembles it purely
+    from event-log-derived state."""
+
+    model_config = ConfigDict(frozen=True)
+
+    day: int
+    round: int
+    tick: int
+    persona: PersonaCard
+    location: str
+    locations: list[str]
+    qi: int
+    stones: int
+    allowance_left: int
+    co_present: list[str]  # display names of living co-located others
+    heard: list[HeardUtterance]  # <= 6, most recent last, day >= day-1
+    notes: list[str]  # own last 5 NOTE texts, oldest first
+    reflection: str  # own latest REFLECTION text ("" on day 0)
+    outcomes: list[str]  # own last 3 TASK_ATTEMPT messages, oldest first
+    tasks: list[TaskStub]  # the visible task board
+    materials: list[int]  # stones cost by tier (from config)
+    bounties: list[int]  # payout by tier (from config)
+
+
+# ------------------------------------------------------------- live config
+
+
+class ModelSection(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    backend: str  # "mlx" | "scripted"
+    model_id: str
+    max_tokens: int = Field(ge=1)
+    reflection_max_tokens: int = Field(ge=1)
+    temp_permille: int = Field(ge=0, le=2000)
+    seed: int = Field(ge=0)
+    prompt_budget_chars: int = Field(ge=1000)
+
+
+class UniverseSection(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    name: str  # "wuxing"
+    seed: str  # hex; independent of the world master seed by design
+    tiers: int = Field(ge=1, le=5)
+
+
+class LiveSection(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    locations: list[str] = Field(min_length=1)
+    first_discovery_multiplier: int = Field(ge=1)
+
+
+class LiveWorldConfig(WorldConfig):
+    """The live world = the frozen Phase-0 config plus Phase-1 sections.
+    Kept as a SEPARATE model so the Phase-0 stub `config_sha` (and with it
+    the Phase-0 golden fingerprint) is untouched; live runs fingerprint the
+    full extended model via `live_config_sha`."""
+
+    model: ModelSection
+    universe: UniverseSection
+    live: LiveSection
+
 __all__ = [
     "SCHEMA_VERSION",
     "GENESIS_HASH",
@@ -289,4 +547,25 @@ __all__ = [
     "StubView",
     "TickSlot",
     "Iterable",
+    # Phase 1
+    "QI_INPUT_DIVISOR",
+    "MAX_ACTION_PARSE_RETRIES",
+    "NOTE_MAX_CHARS",
+    "qi_llm_cost",
+    "GenParams",
+    "GenResult",
+    "ModelBackendP",
+    "TaskStub",
+    "Submission",
+    "Outcome",
+    "UniverseManifest",
+    "AuditReport",
+    "UniverseP",
+    "PersonaCard",
+    "HeardUtterance",
+    "PerceptionView",
+    "ModelSection",
+    "UniverseSection",
+    "LiveSection",
+    "LiveWorldConfig",
 ]
