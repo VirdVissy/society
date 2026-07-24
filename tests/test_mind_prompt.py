@@ -89,6 +89,13 @@ one of: experiment, converse, teach, study, trade, note, travel, meditate,
 challenge, attempt_breakthrough, rest.
 Arguments by action (no other keys are accepted; numbers are plain integers):
   experiment {"task_id": "<task id>", "steps": [["<a>", "<b>"], ...]}
+    Each step is a PAIR OF EXACT INGREDIENT NAMES to combine in the crucible —
+    never instructions or descriptions. Usable names: the five bases (wood,
+    fire, earth, metal, water) and the exact full name of any product an
+    EARLIER step of this same attempt yielded (names may contain hyphens;
+    copy them exactly). Any other name is not at hand and the attempt stops.
+    Example: {"action": "experiment", "task_id": "wx-t1-0",
+              "steps": [["wood", "fire"]]}
   converse {"target": "<name>", "text": "<what you say aloud>"}
   travel {"to": "<location>"}
   trade {"target": "<name>", "stones": <integer greater than 0>}
@@ -124,6 +131,8 @@ RECENT EXPERIMENT OUTCOMES (oldest first)
 - A faint shimmer: the ash took the water.
 
 TASK BOARD
+Base ingredients always at hand: wood, fire, earth, metal, water.
+Combining unlocks products; a product's exact name becomes usable in later steps.
 - w1-01: produce "cinnabar-ash" (tier 1, materials 1 stones, bounty 10 stones)
 - w2-03: produce "quenched-iron" (tier 2, materials 2 stones, bounty 25 stones)"""
 
@@ -142,14 +151,14 @@ GOLDEN_REFLECTION = (
 )
 
 # sha256 of the utf-8 canonical envelope over (GOLDEN_SYSTEM, GOLDEN_USER).
-GOLDEN_PROMPT_SHA = "0d5c1ff1e5a177f44f30dc9eed6ec7f7dda082e2754076a7db580e332fd69d3c"
+GOLDEN_PROMPT_SHA = "3197073b379bac483e2a54d27cccea5d4b7f68d6917c1f0b0bb4b24ab4475be0"
 
 
 # ------------------------------------------------------------------- goldens
 
 
 def test_template_version_pinned() -> None:
-    assert TEMPLATE_VERSION == "p1.0"
+    assert TEMPLATE_VERSION == "p1.1"
 
 
 def test_golden_system() -> None:
@@ -275,7 +284,12 @@ def test_empty_sections_render_placeholders() -> None:
     assert "YOUR NOTES (oldest first)\n(none)" in text
     assert "YOUR LAST REFLECTION\n(none)" in text
     assert "RECENT EXPERIMENT OUTCOMES (oldest first)\n(none)" in text
-    assert "TASK BOARD\n(no tasks posted)" in text
+    assert (
+        "TASK BOARD\n"
+        "Base ingredients always at hand: wood, fire, earth, metal, water.\n"
+        "Combining unlocks products; a product's exact name becomes usable in later steps.\n"
+        "(no tasks posted)"
+    ) in text
 
 
 def test_task_tier_outside_tables_asserts() -> None:

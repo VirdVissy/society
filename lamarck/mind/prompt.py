@@ -37,7 +37,7 @@ __all__ = [
     "render_user",
 ]
 
-TEMPLATE_VERSION = "p1.0"
+TEMPLATE_VERSION = "p1.1"  # p1.1: exact-ingredient experiment rules + base list on the board
 
 _ACTION_CLOSING = "Choose your action now. Reply with exactly one JSON object."
 _REFLECTION_CLOSING = (
@@ -75,6 +75,13 @@ def render_system(persona: PersonaCard) -> str:
         "challenge, attempt_breakthrough, rest.\n"
         "Arguments by action (no other keys are accepted; numbers are plain integers):\n"
         '  experiment {"task_id": "<task id>", "steps": [["<a>", "<b>"], ...]}\n'
+        "    Each step is a PAIR OF EXACT INGREDIENT NAMES to combine in the crucible —\n"
+        "    never instructions or descriptions. Usable names: the five bases (wood,\n"
+        "    fire, earth, metal, water) and the exact full name of any product an\n"
+        "    EARLIER step of this same attempt yielded (names may contain hyphens;\n"
+        "    copy them exactly). Any other name is not at hand and the attempt stops.\n"
+        '    Example: {"action": "experiment", "task_id": "wx-t1-0",\n'
+        '              "steps": [["wood", "fire"]]}\n'
         '  converse {"target": "<name>", "text": "<what you say aloud>"}\n'
         '  travel {"to": "<location>"}\n'
         '  trade {"target": "<name>", "stones": <integer greater than 0>}\n'
@@ -134,7 +141,11 @@ def _outcomes_block(view: PerceptionView) -> str:
 
 
 def _tasks_block(view: PerceptionView) -> str:
-    lines = ["TASK BOARD"]
+    lines = [
+        "TASK BOARD",
+        "Base ingredients always at hand: wood, fire, earth, metal, water.",
+        "Combining unlocks products; a product's exact name becomes usable in later steps.",
+    ]
     if view.tasks:
         for task in view.tasks:
             LMK_ASSERT(
