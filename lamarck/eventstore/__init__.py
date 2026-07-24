@@ -10,5 +10,6 @@ Public API:
 
 from lamarck.eventstore.canonical import CanonicalError, canonical_bytes, sha256_hex
 from lamarck.eventstore.store import EventStore
+from lamarck.eventstore.texts import TextsStore
 
-__all__ = ["CanonicalError", "EventStore", "canonical_bytes", "sha256_hex"]
+__all__ = ["CanonicalError", "EventStore", "TextsStore", "canonical_bytes", "sha256_hex"]

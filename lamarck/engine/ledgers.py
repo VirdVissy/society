@@ -13,28 +13,40 @@ that fold twice, on purpose:
     exactly what ``assert_difftest`` exists to catch.
 
 Event semantics applied by BOTH implementations (per the frozen contracts,
-"PHASE-0 ACTION SEMANTICS"):
+"PHASE-0 ACTION SEMANTICS" and "PHASE-1 LIVE SEMANTICS"):
 
   - AGENT_SPAWNED   registers ``payload["agent_id"]`` with
                     ``qi = payload["qi_max"]``, ``stones =
                     payload["starting_stones"]``, ``alive = True``. The
                     event's own deltas are zero (asserted live).
   - ACTION          applies ``qi_delta`` / ``stones_delta`` to ``ev.actor``.
+  - LLM_CALL        applies ``qi_delta`` to ``ev.actor`` exactly like ACTION
+                    (Phase-1 token billing: ``qi_delta = -qi_llm_cost(...)``);
+                    ``stones_delta`` must be zero (asserted live) — model
+                    calls never move stones.
   - LEDGER_ADJUST   same delta application (bounty credits etc.).
   - AGENT_DIED      clears the alive flag of ``ev.actor``.
   - DAY_STARTED     resets per-day qi-spend tracking (live ledger only; the
                     fold carries no spend state).
+  - TASK_ATTEMPT,   balance no-ops carrying zero deltas (asserted live) whose
+    REFLECTION      actor must be a registered, ALIVE agent — they are
+                    world-emitted evidence/memory records, never money moves.
   - RUN_STARTED, PHASE_STARTED, RUN_FINISHED are balance no-ops.
 
 Invariants enforced by the live ledger (LMK_ASSERT):
-  - ACTION / LEDGER_ADJUST / AGENT_DIED target a registered, ALIVE actor
-    (strict by decision: even adjustments may not target the dead in Phase 0).
+  - ACTION / LLM_CALL / LEDGER_ADJUST / AGENT_DIED / TASK_ATTEMPT /
+    REFLECTION target a registered, ALIVE actor (strict by decision: even
+    adjustments may not target the dead).
   - stones never go negative; qi MAY go negative (death is decided at dusk by
     the runner, per contracts — the ledger only accounts).
-  - world events (and spawns and deaths) carry zero deltas.
+  - world events (and spawns and deaths) carry zero deltas; so do
+    TASK_ATTEMPT and REFLECTION; LLM_CALL carries zero ``stones_delta``.
   - an agent's qi spend within one day (the negative qi_delta of its ACTION
-    events since the last DAY_STARTED) never exceeds ``qi.daily_allowance`` —
-    a committed over-allowance action means the runner failed to degrade it.
+    *and* LLM_CALL events since the last DAY_STARTED — Phase-1 extension per
+    the contracts' live semantics) never exceeds ``qi.daily_allowance`` — a
+    committed over-allowance event means the runner failed to degrade it.
+    Phase-0 histories contain no LLM_CALL events, so Phase-0 accounting is
+    byte-identical to before the extension.
 
 The ledger never inspects ``seq`` or ``hash`` — chain integrity is the event
 store's concern; that separation is intentional. It also never emits events
@@ -129,10 +141,22 @@ class Ledgers:
             self._apply_spawn(ev)
         elif ev.kind is EventKind.ACTION:
             self._apply_deltas(ev)
-            spend = -ev.qi_delta if ev.qi_delta < 0 else 0
-            self._allowance.note_spend(ev.actor, spend)
+            self._note_qi_spend(ev)
+        elif ev.kind is EventKind.LLM_CALL:
+            LMK_ASSERT(
+                ev.stones_delta == 0,
+                "LLM_CALL must carry zero stones_delta",
+                actor=ev.actor,
+                stones_delta=ev.stones_delta,
+                seq=ev.seq,
+            )
+            self._apply_deltas(ev)
+            self._note_qi_spend(ev)
         elif ev.kind is EventKind.LEDGER_ADJUST:
             self._apply_deltas(ev)
+        elif ev.kind is EventKind.TASK_ATTEMPT or ev.kind is EventKind.REFLECTION:
+            self._assert_zero_deltas(ev)
+            self._assert_registered_alive(ev.actor, ev)
         elif ev.kind is EventKind.AGENT_DIED:
             self._assert_zero_deltas(ev)
             self._assert_registered_alive(ev.actor, ev)
@@ -204,6 +228,12 @@ class Ledgers:
         self._qi[ev.actor] += ev.qi_delta  # qi MAY go negative; dusk decides death
         self._stones[ev.actor] = new_stones
 
+    def _note_qi_spend(self, ev: EventRecord) -> None:
+        """Feed the allowance meter: negative qi on ACTION / LLM_CALL is the
+        day's spend (contracts, live semantics: both kinds count)."""
+        spend = -ev.qi_delta if ev.qi_delta < 0 else 0
+        self._allowance.note_spend(ev.actor, spend)
+
     def _assert_registered_alive(self, agent: str, ev: EventRecord) -> None:
         LMK_ASSERT(
             agent in self._alive,
@@ -249,7 +279,11 @@ def fold_balances(events: Iterable[EventRecord], cfg: WorldConfig) -> LedgerBala
             qi[agent] = ev.payload["qi_max"]
             stones[agent] = ev.payload["starting_stones"]
             alive[agent] = True
-        elif ev.kind is EventKind.ACTION or ev.kind is EventKind.LEDGER_ADJUST:
+        elif (
+            ev.kind is EventKind.ACTION
+            or ev.kind is EventKind.LLM_CALL
+            or ev.kind is EventKind.LEDGER_ADJUST
+        ):
             qi[ev.actor] += ev.qi_delta
             stones[ev.actor] += ev.stones_delta
         elif ev.kind is EventKind.AGENT_DIED:

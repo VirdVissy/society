@@ -1,0 +1,193 @@
+"""Model backends — the text-generation seam (contracts: ``ModelBackendP``).
+
+The ``prompt: str`` handed to any backend is ALWAYS the canonical-JSON
+envelope string ``{"system": <system_text>, "template": <TEMPLATE_VERSION>,
+"user": <user_text>}`` produced by :mod:`lamarck.mind.prompt`. Backends may
+parse it (:class:`MlxBackend` does, to build chat messages) or treat it as
+an opaque script key (:class:`ScriptedBackend` does).
+
+Division of labour (contracts: "PHASE-1 LIVE SEMANTICS"):
+
+- Backends return RAW text in ``GenResult``; the runner applies
+  :func:`sanitize_model_text` before anything is committed. Sanitized,
+  NFC-normalized committed text is the truth consumed by parsers.
+- Backends implement NO policy: no retries, no fallbacks, no degradation.
+  Errors propagate; the runner owns retry/forfeit semantics.
+- Usage is true token counts for real backends; :class:`ScriptedBackend`
+  synthesizes ``ceil(len/4)`` (the exact formula is pinned in tests).
+
+``MlxBackend`` keeps every mlx import lazy inside ``__init__`` — ``mlx-lm``
+is an optional extra (``[llm]``) and is absent in CI. The float conversion
+``temp_permille / 1000`` happens at the mlx boundary only and is never
+serialized (house no-floats rule applies to serialized state, not to a
+third-party sampler's argument).
+
+mlx-lm API surface coded against (mlx-lm >= 0.24):
+
+- ``mlx_lm.load(model_id) -> (model, tokenizer)``
+- ``mlx_lm.generate(model, tokenizer, prompt: str | list[int], *,
+  max_tokens: int, sampler, verbose: bool) -> str`` (completion text only)
+- ``mlx_lm.sample_utils.make_sampler(temp: float) -> sampler``
+- ``mlx.core.random.seed(int)``
+- ``tokenizer.apply_chat_template(messages, add_generation_prompt=True,
+  tokenize=True[, enable_thinking=False]) -> list[int]`` and
+  ``tokenizer.encode(text) -> list[int]``; ``tokenizer.chat_template`` is
+  the raw template source (the ``enable_thinking`` capability check).
+"""
+
+from __future__ import annotations
+
+import importlib
+import json
+from collections import deque
+from collections.abc import Callable
+from typing import Any
+
+from lamarck.asserts import LMK_ASSERT
+from lamarck.contracts import GenParams, GenResult, ModelBackendP, ModelSection
+
+__all__ = ["MlxBackend", "ScriptedBackend", "make_backend", "sanitize_model_text"]
+
+_NUL = "\x00"
+_SURROGATE_LO = 0xD800
+_SURROGATE_HI = 0xDFFF
+_REPLACEMENT = "�"
+
+
+def sanitize_model_text(text: str) -> str:
+    """Make raw model output safe for canonical JSON: lone surrogates become
+    U+FFFD and NULs (U+0000) are stripped.
+
+    Any surrogate code point in a Python ``str`` is lone by construction
+    (well-formed text never contains code points in U+D800..U+DFFF), so every
+    surrogate is replaced. Idempotent: the output contains no surrogates and
+    no NULs, and re-sanitizing is the identity (property-tested). The runner
+    applies this to backend output; backends return raw text.
+    """
+    out: list[str] = []
+    for ch in text:
+        code = ord(ch)
+        if code == 0:
+            continue
+        if _SURROGATE_LO <= code <= _SURROGATE_HI:
+            out.append(_REPLACEMENT)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _ceil_div_4(n: int) -> int:
+    """Integer ceil(n/4) — no float ever materializes."""
+    return -(-n // 4)
+
+
+class ScriptedBackend:
+    """Deterministic CI workhorse: replays a script instead of a model.
+
+    ``responses`` is either a ``deque[str]`` (popped left, FIFO — the script
+    plays in order) or a callable ``(prompt, params) -> str``. Usage is
+    synthesized as ``usage_in = ceil(len(prompt)/4)``,
+    ``usage_out = ceil(len(text)/4)`` (ints; formula pinned in tests).
+
+    Queue exhaustion raises ``IndexError``: an exhausted script is a
+    test-authoring bug, never a runtime path, so it is deliberately loud.
+    """
+
+    def __init__(self, responses: Callable[[str, GenParams], str] | deque[str]) -> None:
+        self._responses = responses
+
+    def generate(self, prompt: str, params: GenParams) -> GenResult:
+        if isinstance(self._responses, deque):
+            text = self._responses.popleft()  # IndexError on exhaustion: test bug
+        else:
+            text = self._responses(prompt, params)
+        return GenResult(
+            text=text,
+            usage_in=_ceil_div_4(len(prompt)),
+            usage_out=_ceil_div_4(len(text)),
+        )
+
+
+class MlxBackend:
+    """Real local generation through mlx-lm (Apple silicon).
+
+    All mlx imports happen lazily in ``__init__`` (optional extra; absent in
+    CI). ``generate`` parses the canonical-JSON envelope prompt, applies the
+    tokenizer's chat template, seeds ``mx.random`` from ``params.seed``, and
+    samples at ``temp_permille / 1000``. Usage counts are true tokenizer
+    counts: the templated prompt tokens in, the encoded output text out.
+    No retries, no fallbacks — errors propagate (the runner owns policy).
+    """
+
+    def __init__(self, model_id: str) -> None:
+        mlx_lm = importlib.import_module("mlx_lm")  # lazy: optional [llm] extra
+        sample_utils = importlib.import_module("mlx_lm.sample_utils")
+        mx = importlib.import_module("mlx.core")
+        self._generate: Any = mlx_lm.generate
+        self._make_sampler: Any = sample_utils.make_sampler
+        self._mx: Any = mx
+        self.model_id = model_id
+        self._model, self._tokenizer = mlx_lm.load(model_id)
+
+    def generate(self, prompt: str, params: GenParams) -> GenResult:
+        envelope = json.loads(prompt)
+        LMK_ASSERT(
+            isinstance(envelope, dict) and set(envelope) == {"system", "template", "user"},
+            "prompt is not the canonical envelope {system, template, user}",
+            got=str(prompt)[:120],
+        )
+        messages = [
+            {"role": "system", "content": envelope["system"]},
+            {"role": "user", "content": envelope["user"]},
+        ]
+        # Capability check (never try/except-pass): only pass enable_thinking
+        # when the chat template actually consumes it (Qwen3 family does).
+        template_kwargs: dict[str, Any] = {}
+        chat_template = getattr(self._tokenizer, "chat_template", None)
+        if isinstance(chat_template, str) and "enable_thinking" in chat_template:
+            template_kwargs["enable_thinking"] = False
+        prompt_tokens = self._tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            **template_kwargs,
+        )
+        self._mx.random.seed(params.seed)
+        sampler = self._make_sampler(temp=params.temp_permille / 1000)  # float: mlx boundary only
+        text = self._generate(
+            self._model,
+            self._tokenizer,
+            prompt=prompt_tokens,
+            max_tokens=params.max_tokens,
+            sampler=sampler,
+            verbose=False,
+        )
+        return GenResult(
+            text=str(text),
+            usage_in=len(prompt_tokens),
+            usage_out=len(self._tokenizer.encode(str(text))),
+        )
+
+
+def make_backend(section: ModelSection) -> ModelBackendP:
+    """Construct the backend named by ``[model].backend``.
+
+    ``"scripted"`` is refused here on purpose: there is no default script,
+    so tests must construct :class:`ScriptedBackend` directly with the exact
+    responses they mean to replay. ``"mlx"`` loads the real model (and will
+    raise ``ModuleNotFoundError`` where mlx-lm is not installed). Anything
+    else is a config error.
+    """
+    if section.backend == "scripted":
+        raise ValueError(
+            "backend 'scripted' has no default script: construct "
+            "ScriptedBackend(responses=...) directly with the script the test means to replay"
+        )
+    if section.backend == "mlx":
+        return MlxBackend(section.model_id)
+    raise ValueError(f"unknown model backend: {section.backend!r} (expected 'mlx' or 'scripted')")
+
+
+def _proves_protocol(scripted: ScriptedBackend, mlx: MlxBackend) -> tuple[ModelBackendP, ...]:
+    """Compile-time (mypy) proof that both backends satisfy ModelBackendP."""
+    return (scripted, mlx)

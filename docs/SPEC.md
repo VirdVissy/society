@@ -169,8 +169,9 @@ Hardening beyond the letter of the contract (locked): a *committed* ACTION
 whose spend exceeds the daily allowance trips an always-on assertion in the
 live ledger — degradation is the producer's job, and a recorded
 over-allowance spend is a producer bug, never silently tolerated. Spawn,
-death, and world events must carry zero deltas. Only negative `qi_delta` on
-`ACTION` events counts as allowance spend.
+death, and world events must carry zero deltas. Negative `qi_delta` on
+`ACTION` and `LLM_CALL` events counts as allowance spend (Phase 1: thinking
+bills on the model call, physical surcharges on the action).
 
 ## 8. Replay contract
 
@@ -183,6 +184,46 @@ sim — no Scheduler, no StubPolicy, no RNG — so it cannot share a bug with
 the producer. A run is *reproducible* iff replay passes; the golden test
 pins the chain head of a fixed config+seed so any semantic drift in engine
 code is caught as a hash change.
+
+## 9a. Phase 1 additions (locked at v0.2.0)
+
+Contracts: `lamarck/contracts.py` "PHASE-1 LIVE SEMANTICS" is normative for
+billing, the action protocol, and live action args. Decisions ratified from
+the build waves:
+
+- **LLM_CALL** events carry `qi_delta = -qi_llm_cost(in, out)` =
+  `-(ceil(in/4) + out)`; `stones_delta` must be zero. `TASK_ATTEMPT` and
+  `REFLECTION` are zero-delta, living-actor events.
+- **Prompt envelope**: the string passed to any backend is canonical JSON
+  `{"system", "template", "user"}` with `TEMPLATE_VERSION = "p1.0"` (any
+  wording change bumps it; goldens catch unversioned drift).
+  `prompt_sha256 = sha256(envelope)`. Full prompt texts live in the unhashed
+  `llm_texts` side table (`lamarck/eventstore/texts.py`): dropping that
+  table cannot change any fingerprint, and writes must land outside
+  `EventStore.batch()` windows (single-writer file).
+- **Utterance delivery**: a non-degraded CONVERSE delivers at emission to
+  *living* co-located others (a later traveler keeps what they heard;
+  non-co-located agents never receive it). Perception shows the ≤ 6 most
+  recent with `day ≥ current_day − 1`, oldest first.
+- **Degraded events short-circuit**: the world fold ignores degraded
+  CONVERSE/TRAVEL/NOTE payloads entirely; `wanted` payloads of degraded
+  actions are not validated (the runner's retry path owns arg validity).
+- **Parser**: failure-reason catalog and the first-balanced-brace rule are
+  locked by tests; `MAX_ACTION_PARSE_RETRIES = 1`, second failure forfeits
+  as `{type: "rest", degraded: true, reason: "malformed"}`.
+- **Wuxing**: 34 compounds over tiers {1:8, 2:8, 3:7, 4:6, 5:5}; one recipe
+  per compound (unordered pair, unique across the universe, ≥ one
+  ingredient of tier t−1); non-recipe pairs yield `slag`; `slag` is
+  absorbing. Submissions cap at 12 steps; generation enforces
+  producibility (a recipe's closure must fit `MAX_STEPS − (tiers − tier)`),
+  so every commission is winnable — `oracle_audit`/`lamarck audit` proves
+  it before a run. `attempt` is rng-free; `verified` = target appears in
+  `step_products` (mid-procedure counts). No public surface (manifest,
+  tasks, titles, outcomes) may reveal a recipe or name an unproduced
+  compound other than the task target.
+- **Config fingerprints**: the Phase-0 `config_sha` of `configs/world.toml`
+  is regression-pinned (`24cbbf0e…`); live runs fingerprint the extended
+  model via `live_config_sha` (valley golden `3723764d…`).
 
 ## 9. Deviations from PLAN.md §3 (recorded, deliberate)
 
