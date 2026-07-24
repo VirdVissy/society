@@ -1,0 +1,138 @@
+# lamarck SPEC — locked formats and semantics
+
+Formats in this document are **locked**: changing any of them is a
+breaking change that requires a devlog entry, a migration note, and updates to
+the format-lock tests that pin them. Phase 0 locks §1–§6. Later phases append;
+they do not silently rewrite.
+
+Source of truth for types: `lamarck/contracts.py`. This document explains and
+freezes; the contracts file compiles.
+
+---
+
+## 1. Canonical JSON
+
+The only serialized form for anything hashed, stored, or compared.
+
+- Values: `str | int | bool | None | dict[str, …] | list[…]`. Nothing else.
+- **Floats are rejected** (`CanonicalError`), even integral ones. Fractions are
+  scaled integers by convention (`*_permille`). NaN/Inf are impossible by
+  construction.
+- All strings — keys and values — are **NFC-normalized** before encoding.
+- Keys: `str` only, sorted by codepoint after normalization.
+- Encoding: `json` with separators `(",", ":")`, `ensure_ascii=False`, UTF-8.
+- Determinism guarantee: `canonical(x)` is byte-identical across runs,
+  platforms, and Python patch versions (property-tested: idempotence and
+  parse→re-encode round-trip).
+
+Implementation: `lamarck/eventstore/canonical.py`
+(`canonical_bytes`, `sha256_hex`, `CanonicalError`).
+
+## 2. Event envelope and hash chain
+
+```
+envelope_i = {"seq": i, "day": d, "tick": t, "kind": k, "actor": a,
+              "payload": p, "qi_delta": q, "stones_delta": s}
+hash_i     = sha256_hex( utf8(prev_hash_hex) || canonical_bytes(envelope_i) )
+```
+
+- `prev` of the first event (`seq = 0`) is `GENESIS_HASH = "0" × 64`.
+- The chain head `(last_seq, last_hash)` is the **run fingerprint**.
+- Wall-clock timestamps live in an unhashed side column (`wall_ts`) and are
+  never part of any hashed or compared state — replay is time-independent.
+- Store: SQLite, `journal_mode=WAL`, single-writer, append-only. Schema:
+  `events(seq PK, day, tick, kind, actor, payload, qi_delta, stones_delta,
+  hash, wall_ts)`.
+- `verify_chain` recomputes every hash from genesis and re-canonicalizes every
+  payload; any divergence is a hard failure. Tampering with any committed byte
+  changes the fingerprint.
+
+## 3. Event kinds (Phase 0)
+
+| kind | actor | payload | notes |
+|---|---|---|---|
+| `run_started` | world | `run_id`, `config_sha`, `master_seed`, `schema_version`, `engine_version` | first event of every run |
+| `day_started` | world | `day` | resets daily qi-spend meters |
+| `phase_started` | world | `day`, `phase` ∈ dawn/action/dusk/night | structure marker |
+| `agent_spawned` | world | `agent_id`, `qi_max`, `starting_stones` | balances initialize from payload; deltas zero |
+| `action` | agent | `type` ∈ ActionType, args; degraded actions add `degraded: true`, `wanted` | qi cost in `qi_delta` (negative); materials in `stones_delta` |
+| `ledger_adjust` | agent | `reason` (e.g. `"bounty"`), `tier` | engine-side credit/debit via envelope deltas |
+| `agent_died` | agent | `cause` (e.g. `"qi_exhausted"`) | emitted at dusk |
+| `run_finished` | world | `days_elapsed`, `final_state_sha` | `final_state_sha` = sha256 of canonical `LedgerBalances` |
+
+ActionType (11, locked): `experiment, converse, teach, study, trade, note,
+travel, meditate, challenge, attempt_breakthrough, rest`.
+
+## 4. RNG substreams
+
+```
+name_tag    = u64_be( sha256(utf8(name))[0:8] )
+stream_seed = splitmix64( master_seed XOR name_tag )
+stream      = random.Random(stream_seed)
+```
+
+- `splitmix64` is the published reference algorithm; pinned vectors in
+  `tests/test_rng.py` (seed 0 → `0xE220A8397B1DCDAF`).
+- Substreams are memoized per name, never reseeded mid-run, never shared
+  across subsystems. Phase-0 canonical names: `"scheduler"`,
+  `"stub-universe"`, `"agent:{agent_id}"`.
+- Master seed family: `0xDE5EED…` (default `0xDE5EEDDE5EEDDE5E`).
+
+## 5. Sim-day structure and scheduler
+
+Per day: one `DAWN` world slot → `rounds_per_day` rounds of per-agent `ACTION`
+slots (`ticks_per_agent_per_round` each; order = seeded shuffle of alive
+agents from the `"scheduler"` stream, reshuffled every round) → one `DUSK`
+world slot → one `NIGHT` world slot. Tick indices are contiguous from 0
+within each day. Two runs with identical config and seed produce identical
+slot sequences.
+
+## 6. Phase-0 stub semantics (replaced by real semantics in Phase 1+)
+
+- Every action costs flat qi per ActionType (`[qi.action_costs]`) — the
+  stand-in for token metering.
+- `EXPERIMENT {tier ∈ 1..5}` additionally requires `materials[tier-1]` stones.
+  Success drawn from `"stub-universe"`: uniform int in `[0, 1000)` `<`
+  `stub_success_permille[tier-1]` → follow-up `ledger_adjust` crediting
+  `bounties[tier-1]` stones (reason `"bounty"`).
+- **Degradation rule**: an action the agent cannot afford (stones, or daily
+  qi allowance `[qi.daily_allowance]`) degrades to `REST`, recording
+  `{degraded: true, wanted: …}`. No free retries; sloppiness costs.
+- **Death**: at dusk, any agent with `qi ≤ 0` dies (`agent_died`,
+  `cause = "qi_exhausted"`). Dead agents take no further slots. Run ends
+  after `days` or when all agents are dead.
+- Stones never go negative (engine assertion). Qi may go negative between
+  action and dusk.
+
+## 7. Difftest (ledger integrity)
+
+Two independent implementations of balance accounting must agree at every
+dusk and at run end:
+
+1. **Live**: `Ledgers.apply(event)` as events commit.
+2. **Fold**: `fold_balances(events, cfg)` — a from-scratch fold over the log
+   sharing no code path with the live ledger.
+
+`assert_difftest` compares full `LedgerBalances` (qi, stones, alive) and
+fails hard with a per-agent diff. This is the sim-ex difftest pattern: the
+value is that the implementations *can* disagree.
+
+## 8. Replay contract
+
+`lamarck replay <run_dir>` must, with no model calls and no wall-clock
+dependence: verify the hash chain from genesis, refold ledgers, recompute
+`final_state_sha`, and compare both the chain head and the state sha against
+the `run_finished` payload. Exit code 0 iff everything matches. A run is
+*reproducible* iff replay passes; the golden test pins the chain head of a
+fixed config+seed so any semantic drift in engine code is caught as a hash
+change.
+
+## 9. Deviations from PLAN.md §3 (recorded, deliberate)
+
+- `stones_delta` added to the event envelope alongside `qi_delta` (PLAN showed
+  only `qi_delta`): both ledgers difftest cleanly through one mechanism.
+- Package layout: PLAN §9's top-level dirs live under the `lamarck/` Python
+  package (`lamarck/engine/`, …) for standard packaging; repo-level dirs
+  (`configs/`, `docs/`, `runs/`, `personas/`) unchanged.
+- Probability-like config values are permille integers (`stub_success_permille`)
+  per the no-floats rule.
