@@ -37,12 +37,13 @@ __all__ = [
     "render_user",
 ]
 
-TEMPLATE_VERSION = "p1.2"  # p1.2: once-per-cultivator bounty rule (p1.1: exact ingredients)
+TEMPLATE_VERSION = "p1.3"  # p1.3: reflection claims-nudge (p1.2: bounty rule; p1.1: ingredients)
 
 _ACTION_CLOSING = "Choose your action now. Reply with exactly one JSON object."
 _REFLECTION_CLOSING = (
     "Dusk has fallen. In at most 3 sentences, write your private diary of this day: "
     "what you tried, what you learned, what you intend tomorrow. "
+    "Name any commission you now know how to fulfill but have not yet claimed. "
     "Reply with the diary text only — no JSON."
 )
 

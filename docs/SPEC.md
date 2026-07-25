@@ -233,6 +233,18 @@ the build waves:
   cross-agent verification still pays base once. The shallow-replay
   verifier enforces it (a re-paying adjust is a mismatch), and the rule is
   stated on the task board (template p1.2).
+- **Board notes** (ratified from acceptance-run evidence, second finding):
+  TASK_ATTEMPT messages are the universe's outcome message plus a
+  deterministic runner suffix cross-referencing each produced non-slag
+  compound to the commission that pays for it ("The board notes: X fulfills
+  wx-tN-i."). This joins two facts every prompt already displays separately
+  — 14 observed days showed agents producing all 8 tier-1 compounds while
+  filing only 2 commissions because the link went unmade, then drifting
+  into social idling as income collapsed. No hidden information moves: the
+  map comes from public board titles. Runner and shallow-replay verifier
+  share one helper, so they cannot diverge. Template p1.3 adds a matching
+  reflection nudge ("name any commission you now know how to fulfill but
+  have not yet claimed").
 - **Cloud backend** (ratified at the user's request): `model.backend =
   "anthropic"` serves generation from the Anthropic API. The "no network in
   the sim loop" rule is refined to its actual intent: *agents* may never

@@ -50,6 +50,27 @@ forfeit counts) survived, proving the scripted policy was wording-robust.
 first-class for dev and for Phase 3's weight training. Determinism was
 never local-dependent: record/replay via the hash chain, verified below.
 
+### Pivot 3 — once-per-cultivator bounties + board notes (paid-run evidence)
+
+The first acceptance attempt (halted at day 5 by account credit exhaustion)
+exposed **bounty farming**: unlimited repeat pay made re-verifying 2 known
+commissions dominate exploration (20 payouts, 2 distinct, frontier dead).
+Fix: the board honors each commission once per cultivator, enforced by the
+runner AND the shallow-replay verifier, stated on the board (p1.2).
+
+The second attempt (halted deliberately at day ~14) exposed the successor
+failure: with farming unpaid, agents had produced **all 8 tier-1
+compounds** (90 productions inside unverified attempts — autumn-mirror 24
+times) yet filed only 2 commissions; income collapsed and days 8–13
+drifted to resting/chatting (172 rest, 165 converse, 56 experiment). The
+missing move was joining two public facts: "I made X" ↔ "commission N pays
+for X". Fix: **board notes** — attempt messages now append the
+cross-reference, recomputed identically by the verifier via a shared
+helper; the reflection prompt nudges unclaimed-commission naming (p1.3).
+Both halted runs were also unplanned stability tests: 19 combined
+unattended sim-days, zero unhandled sim exceptions (the two halts were
+external: billing, and my kill).
+
 ## Measured numbers
 
 - **Local baseline** (mlx, Qwen3-4B-4bit, M3 Pro, template p1.0): 2-day

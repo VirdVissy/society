@@ -148,18 +148,19 @@ GOLDEN_REFLECTION = (
     + GOLDEN_BODY
     + "\n\nDusk has fallen. In at most 3 sentences, write your private diary of this day: "
     "what you tried, what you learned, what you intend tomorrow. "
+    "Name any commission you now know how to fulfill but have not yet claimed. "
     "Reply with the diary text only — no JSON."
 )
 
 # sha256 of the utf-8 canonical envelope over (GOLDEN_SYSTEM, GOLDEN_USER).
-GOLDEN_PROMPT_SHA = "11b9965d1d9d27e2236749556d94bedbd421cbaf22b39db078a1963197b85b94"
+GOLDEN_PROMPT_SHA = "8ad1bc8d623ed0a7fa46199cdc7beb3c94b9afa982b8cb51756163e4bdf67759"
 
 
 # ------------------------------------------------------------------- goldens
 
 
 def test_template_version_pinned() -> None:
-    assert TEMPLATE_VERSION == "p1.2"
+    assert TEMPLATE_VERSION == "p1.3"
 
 
 def test_golden_system() -> None:

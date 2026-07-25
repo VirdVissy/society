@@ -118,7 +118,9 @@ Shallow (``replay_live(run_dir)``): verify_chain from genesis; exactly one
 RUN_FINISHED, last, matching the verified head; independent
 ``fold_balances`` refold reproduces ``final_state_sha``; every TASK_ATTEMPT
 re-verifies through a fresh universe built from the run's config (outcome
-fields byte-equal); ``first_in_world`` flags re-derive from the log;
+fields byte-equal; ``message`` = outcome message + the deterministic
+``_board_notes_suffix`` recomputed by the same shared helper);
+``first_in_world`` flags re-derive from the log;
 bounty/trade LEDGER_ADJUST arithmetic and pairing re-check. Model-free.
 Deep (``deep=True``): all shallow checks, then RE-EXECUTE ``run_live``
 into a throwaway directory with a ``CachedBackend`` serving the recorded
@@ -135,8 +137,10 @@ pure function of (config bytes, persona files, backend responses).
 
 from __future__ import annotations
 
+import re
 import tempfile
 import time
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -496,6 +500,7 @@ class _LiveEngine:
             stub for tier in range(1, cfg.universe.tiers + 1) for stub in self.universe.tasks(tier)
         ]
         self.task_by_id = {stub.task_id: stub for stub in self.board}
+        self.task_by_product = _task_by_product(self.board)
         self.max_surcharge = max(cfg.qi.action_costs.values())
         self.first_verified: set[str] = set()  # membership only; never iterated
         # The board honors each commission once per cultivator: repeat
@@ -822,6 +827,7 @@ class _LiveEngine:
             outcome=outcome.tier,
         )
         first = outcome.verified and task_id not in self.first_verified
+        message = outcome.message + _board_notes_suffix(outcome.step_products, self.task_by_product)
         self.commit(
             EventDraft(
                 day=day,
@@ -835,7 +841,7 @@ class _LiveEngine:
                     "verified": outcome.verified,
                     "product": outcome.product,
                     "step_products": list(outcome.step_products),
-                    "message": outcome.message,
+                    "message": message,
                     "first_in_world": first,
                 },
             )
@@ -1139,6 +1145,9 @@ def _reverify_attempts(
     first_in_world flags, and re-check bounty/trade adjust arithmetic and
     pairing. Returns the number of attempts checked."""
     universe = WuxingUniverse(cfg.universe.seed, cfg.universe.tiers)
+    task_by_product = _task_by_product(
+        stub for tier in range(1, cfg.universe.tiers + 1) for stub in universe.tasks(tier)
+    )
     seen_verified: set[str] = set()  # membership only; never iterated
     paid_pairs: set[tuple[str, str]] = set()  # (actor, task_id); once-per-cultivator rule
     checked = 0
@@ -1166,7 +1175,8 @@ def _reverify_attempts(
                 "product": outcome.product,
                 "tier": outcome.tier,
                 "step_products": list(outcome.step_products),
-                "message": outcome.message,
+                "message": outcome.message
+                + _board_notes_suffix(outcome.step_products, task_by_product),
             }
             got = {key: payload.get(key) for key in expected}
             if got != expected:
@@ -1200,6 +1210,45 @@ def _reverify_attempts(
                 mismatches.append(f"ledger_adjust at seq {ev.seq} has unexpected reason {reason!r}")
         prev = ev
     return checked
+
+
+def _task_by_product(board: Iterable[TaskStub]) -> dict[str, str]:
+    """Map product name -> task_id from the PUBLIC board titles.
+
+    Titles are 'produce "<name>"'; the quoted name is extracted. This is a
+    cross-reference over information every prompt already shows — it never
+    touches hidden rules.
+    """
+    mapping: dict[str, str] = {}
+    for stub in board:
+        match = re.search(r'"([^"]+)"', stub.title)
+        LMK_ASSERT(match is not None, "task title does not name its product", title=stub.title)
+        assert match is not None  # narrow for mypy; guaranteed above
+        mapping[match.group(1)] = stub.task_id
+    return mapping
+
+
+def _board_notes_suffix(step_products: Sequence[str], task_by_product: dict[str, str]) -> str:
+    """The board's cross-reference appended to attempt messages: which
+    commission pays for each product the attempt yielded.
+
+    Joins two facts the prompts already display separately (what you made;
+    what the board pays for) — the acceptance-run diagnosis showed agents
+    producing every tier-1 compound while filing only 2 commissions because
+    this link went unmade. Deterministic: first-appearance order, deduped,
+    "slag" and unknown names skipped; empty string when nothing matches.
+    The shallow-replay verifier recomputes it with this same function.
+    """
+    noted: list[str] = []
+    seen: set[str] = set()
+    for product in step_products:
+        if product in seen or product == "slag" or product not in task_by_product:
+            continue
+        seen.add(product)
+        noted.append(f"{product} fulfills {task_by_product[product]}")
+    if not noted:
+        return ""
+    return " The board notes: " + "; ".join(noted) + "."
 
 
 def _check_bounty_adjust(
