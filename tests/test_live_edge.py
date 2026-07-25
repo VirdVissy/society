@@ -128,9 +128,11 @@ def test_allowance_exhaustion_skips_thinking_and_reflection(tmp_path):
 
 
 def test_first_in_world_multiplier_exactly_once_per_task(tmp_path):
-    """Two agents verify the SAME commission: only the chronologically first
-    attempt carries first_in_world and the x3 bounty; every later
-    verification (same day or later days) pays the base bounty."""
+    """Two agents verify the SAME commission across two days: only the
+    chronologically first attempt carries first_in_world and the x3 bounty;
+    the other agent's first verification pays base; and each agent's DAY-2
+    repeat pays NOTHING (the board honors each commission once per
+    cultivator — the anti-farming rule from the acceptance-run finding)."""
     cfg = _cfg(founders=2, days=2, rounds=1)
     task_id, steps = _tier1_recipe(cfg)
 
@@ -157,8 +159,10 @@ def test_first_in_world_multiplier_exactly_once_per_task(tmp_path):
         if ev.kind is EventKind.LEDGER_ADJUST and ev.payload["reason"] == "bounty"
     ]
     base = cfg.economy.bounties[0]
-    assert [ev.stones_delta for ev in adjusts] == [base * 3, base, base, base]
-    assert [ev.payload["first"] for ev in adjusts] == [True, False, False, False]
+    # Day 1: first-in-world x3 for the first agent, base for the second.
+    # Day 2: both repeats verified but UNPAID (once per cultivator).
+    assert [ev.stones_delta for ev in adjusts] == [base * 3, base]
+    assert [ev.payload["first"] for ev in adjusts] == [True, False]
     # The first verifier is whoever the scheduler shuffled first; the second
     # agent's day-0 verification already pays base.
     assert adjusts[0].actor != adjusts[1].actor

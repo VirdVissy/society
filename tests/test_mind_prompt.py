@@ -133,6 +133,7 @@ RECENT EXPERIMENT OUTCOMES (oldest first)
 TASK BOARD
 Base ingredients always at hand: wood, fire, earth, metal, water.
 Combining unlocks products; a product's exact name becomes usable in later steps.
+The board honors each commission once per cultivator; repeat verifications pay nothing.
 - w1-01: produce "cinnabar-ash" (tier 1, materials 1 stones, bounty 10 stones)
 - w2-03: produce "quenched-iron" (tier 2, materials 2 stones, bounty 25 stones)"""
 
@@ -151,14 +152,14 @@ GOLDEN_REFLECTION = (
 )
 
 # sha256 of the utf-8 canonical envelope over (GOLDEN_SYSTEM, GOLDEN_USER).
-GOLDEN_PROMPT_SHA = "3197073b379bac483e2a54d27cccea5d4b7f68d6917c1f0b0bb4b24ab4475be0"
+GOLDEN_PROMPT_SHA = "11b9965d1d9d27e2236749556d94bedbd421cbaf22b39db078a1963197b85b94"
 
 
 # ------------------------------------------------------------------- goldens
 
 
 def test_template_version_pinned() -> None:
-    assert TEMPLATE_VERSION == "p1.1"
+    assert TEMPLATE_VERSION == "p1.2"
 
 
 def test_golden_system() -> None:
@@ -288,6 +289,7 @@ def test_empty_sections_render_placeholders() -> None:
         "TASK BOARD\n"
         "Base ingredients always at hand: wood, fire, earth, metal, water.\n"
         "Combining unlocks products; a product's exact name becomes usable in later steps.\n"
+        "The board honors each commission once per cultivator; repeat verifications pay nothing.\n"
         "(no tasks posted)"
     ) in text
 

@@ -41,10 +41,10 @@ VALLEY_TOML = REPO_ROOT / "configs" / "valley.toml"
 GOLDEN_RUN_ID = "81cdd235ca15"
 GOLDEN_DAYS = 4
 GOLDEN_ALIVE = 8
-GOLDEN_EVENTS = 873
+GOLDEN_EVENTS = 856
 GOLDEN_HEAD_SEQ = GOLDEN_EVENTS - 1
-GOLDEN_HEAD_HASH = "ee04ca089e5be0ac2deecde90385668eacea42d3b459f2872244fa9bb927ec44"
-GOLDEN_FINAL_STATE_SHA = "a3bf59f6b4052a667de600bcf1129500dff7bdbb5682ac0ee93d0816968546a7"
+GOLDEN_HEAD_HASH = "337cdc767939d6c5ffbd8d9a57280649316234ad2ed4689f0160390e20fd4d70"
+GOLDEN_FINAL_STATE_SHA = "bf9bf8d5c7589dc5493050236072bfa06fb977d9fb9b49faae91f8801b8a87cc"
 GOLDEN_KIND_COUNTS = {
     "run_started": 1,
     "agent_spawned": 8,
@@ -54,7 +54,7 @@ GOLDEN_KIND_COUNTS = {
     "llm_call": 320,
     "task_attempt": 146,
     "reflection": 32,
-    "ledger_adjust": 89,  # 81 bounties + 8 trades
+    "ledger_adjust": 72,  # 64 bounties (once per cultivator: 8 agents x 8 tasks) + 8 trades
     "run_finished": 1,
 }
 GOLDEN_ATTEMPTS = 146
@@ -66,7 +66,7 @@ GOLDEN_MALFORMED_FORFEITS = 8  # one doubly-malformed pair per agent (>= 1 requi
 GOLDEN_RETRIES = 32
 GOLDEN_RETRY_RECOVERED = 24  # malformed/bad-location/float specials recover (>= 1 required)
 GOLDEN_LLM_CALLS = 320
-GOLDEN_USAGE_IN = 512954
+GOLDEN_USAGE_IN = 520065
 GOLDEN_USAGE_OUT = 5738
 
 # Payload key sets SPEC §9a will lock.

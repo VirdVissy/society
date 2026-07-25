@@ -37,7 +37,7 @@ __all__ = [
     "render_user",
 ]
 
-TEMPLATE_VERSION = "p1.1"  # p1.1: exact-ingredient experiment rules + base list on the board
+TEMPLATE_VERSION = "p1.2"  # p1.2: once-per-cultivator bounty rule (p1.1: exact ingredients)
 
 _ACTION_CLOSING = "Choose your action now. Reply with exactly one JSON object."
 _REFLECTION_CLOSING = (
@@ -145,6 +145,7 @@ def _tasks_block(view: PerceptionView) -> str:
         "TASK BOARD",
         "Base ingredients always at hand: wood, fire, earth, metal, water.",
         "Combining unlocks products; a product's exact name becomes usable in later steps.",
+        "The board honors each commission once per cultivator; repeat verifications pay nothing.",
     ]
     if view.tasks:
         for task in view.tasks:

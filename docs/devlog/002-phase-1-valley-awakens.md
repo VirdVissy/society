@@ -26,18 +26,55 @@ Four Fable subagents against the extended frozen contracts, two waves:
 - Integration: gates, real-model smoke, the 30-day acceptance run, this
   devlog.
 
-Contract frictions ratified this phase: (TO FILL at integration).
+Contract frictions ratified this phase (full list in SPEC §9a): world-slot
+round numbering, consecutive per-agent ticks, NFC key-collision rejection,
+degraded-REST billing, wuxing producibility cap (free generation produced
+14–16-step recipes unwinnable under the 12-step cap; generation now
+enforces closure ≤ MAX_STEPS − (tiers − tier)), trade-poverty routed to the
+retry path, and the two mid-phase pivots below.
 
-## Measured numbers (TO FILL)
+### Pivot 1 — prompt template p1.1 (the local smoke earned its keep)
 
-- Model: … load time … s; generation … tok/s; prompt prefill … tok/s
-- Smoke run (2 days × 8 agents): … min wall; … LLM calls; … events
-- Qi calibration: median qi/agent/day … (allowance 30k; projected natural
-  lifespan … sim-days)
-- Acceptance run (30 days × 8): … h wall; … events; … MB db; discoveries
-  … distinct (… tier-3+); degraded/malformed rates …/…
-- Deep replay of the acceptance run: byte-identical head … ; … s
-- Suite: … tests, … s; CI matrix green: …
+The 2-day local smoke (Qwen3-4B) produced 48 experiment attempts and ZERO
+discoveries. Diagnosis from the event log: agents emitted valid JSON whose
+`steps` were narrative prose ("expose to moonlight and silence") or
+fragmented compound names (`["silt", "ash"]` for silt-ash) — the protocol
+never said steps are exact ingredient names. p1.1 states it, lists the five
+bases on the task board, and adds one worked example. Golden re-pins were
+mechanical; every behavioral pin (873 events, 81/8 discoveries, retry and
+forfeit counts) survived, proving the scripted policy was wording-robust.
+
+### Pivot 2 — cloud inference (user decision, laptop relief)
+
+`AnthropicBackend` (Haiku 4.5) became the acceptance-run tier; mlx stays
+first-class for dev and for Phase 3's weight training. Determinism was
+never local-dependent: record/replay via the hash chain, verified below.
+
+## Measured numbers
+
+- **Local baseline** (mlx, Qwen3-4B-4bit, M3 Pro, template p1.0): 2-day
+  smoke = 21.3 min wall (~10.6 min/sim-day → a 30-day run ≈ 5.3 h);
+  deep replay byte-identical (head `379/9badd0b4c9f2`); 48 attempts,
+  0 verified — the p1.1 finding above.
+- **Cloud smoke** (Haiku 4.5, template p1.1): 2 days in 14.3 min
+  (~7.1 min/sim-day); 484 events; 256 model calls (112 billed retries,
+  93 recovered — parse-prose and trade-poverty dominated, both
+  self-correcting); usage 784,391 in / 42,216 out ≈ **$0.99**;
+  deep replay byte-identical (head `483/d7d7fae1648a`).
+- **Protocol learnability** (the finding that green-lit the acceptance
+  run): day 0 = 18 attempts / 0 verified (all agents citing the example's
+  commission id); day 1 = 36 attempts / **10 verified** across
+  diversifying task ids — agents connected "the crucible yields X" to the
+  commission that pays for X without any prompt change.
+- Qi calibration (cloud smoke): ~3,200 qi/agent/day median thinking cost
+  against the 30k daily allowance — natural lifespan ≈ 370 sim-days at
+  Phase-1 activity; lifespan pressure will need tuning when Phase 2 makes
+  death matter. *(initial, one smoke's evidence)*
+- **Acceptance run (30 days × 8, Haiku 4.5): (TO FILL on completion)** —
+  wall, events, db size, distinct discoveries (incl. tier-3+), token
+  totals and cost, degraded/malformed rates, deep-replay verdict.
+- Suite: 483 tests + 1 local-only mlx skip, ~8 s. CI matrix: pending the
+  repo's first push (unchanged since Phase 0).
 
 ## Deviations from PLAN (ratified this phase)
 

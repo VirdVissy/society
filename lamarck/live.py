@@ -498,6 +498,10 @@ class _LiveEngine:
         self.task_by_id = {stub.task_id: stub for stub in self.board}
         self.max_surcharge = max(cfg.qi.action_costs.values())
         self.first_verified: set[str] = set()  # membership only; never iterated
+        # The board honors each commission once per cultivator: repeat
+        # verifications by the same agent pay nothing (kills bounty farming,
+        # keeps cross-agent verification worth base pay). Membership only.
+        self.bounties_paid: set[tuple[str, str]] = set()
         self.texts_buffer: list[tuple[int, str]] = []
         self.emitted = 0
         self.night_tick = -1
@@ -839,17 +843,19 @@ class _LiveEngine:
         self.attempts += 1
         self.last_action[actor] = f"experiment {task_id} {'✓' if outcome.verified else '✗'}"
         if outcome.verified:
-            multiplier = self.cfg.live.first_discovery_multiplier if first else 1
-            self.commit(
-                EventDraft(
-                    day=day,
-                    tick=tick,
-                    kind=EventKind.LEDGER_ADJUST,
-                    actor=actor,
-                    payload={"reason": "bounty", "tier": outcome.tier, "first": first},
-                    stones_delta=self.cfg.economy.bounties[outcome.tier - 1] * multiplier,
+            if (actor, task_id) not in self.bounties_paid:
+                multiplier = self.cfg.live.first_discovery_multiplier if first else 1
+                self.commit(
+                    EventDraft(
+                        day=day,
+                        tick=tick,
+                        kind=EventKind.LEDGER_ADJUST,
+                        actor=actor,
+                        payload={"reason": "bounty", "tier": outcome.tier, "first": first},
+                        stones_delta=self.cfg.economy.bounties[outcome.tier - 1] * multiplier,
+                    )
                 )
-            )
+                self.bounties_paid.add((actor, task_id))
             self.discoveries += 1
             self.discoveries_by_agent[actor] += 1
             if first:
@@ -1134,6 +1140,7 @@ def _reverify_attempts(
     pairing. Returns the number of attempts checked."""
     universe = WuxingUniverse(cfg.universe.seed, cfg.universe.tiers)
     seen_verified: set[str] = set()  # membership only; never iterated
+    paid_pairs: set[tuple[str, str]] = set()  # (actor, task_id); once-per-cultivator rule
     checked = 0
     prev: EventRecord | None = None
     for ev in events:
@@ -1179,6 +1186,14 @@ def _reverify_attempts(
             reason = ev.payload.get("reason")
             if reason == "bounty":
                 _check_bounty_adjust(ev, prev, cfg, mismatches)
+                if prev is not None and prev.kind is EventKind.TASK_ATTEMPT:
+                    pair = (ev.actor, str(prev.payload.get("task_id")))
+                    if pair in paid_pairs:
+                        mismatches.append(
+                            f"bounty adjust at seq {ev.seq} re-pays {pair!r}: the board "
+                            "honors each commission once per cultivator"
+                        )
+                    paid_pairs.add(pair)
             elif reason == "trade":
                 _check_trade_adjust(ev, prev, mismatches)
             else:

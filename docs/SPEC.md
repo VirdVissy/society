@@ -224,6 +224,15 @@ the build waves:
 - **Config fingerprints**: the Phase-0 `config_sha` of `configs/world.toml`
   is regression-pinned (`24cbbf0e…`); live runs fingerprint the extended
   model via `live_config_sha` (valley golden `3723764d…`).
+- **Once-per-cultivator bounties** (ratified from acceptance-run evidence):
+  the board pays a commission's bounty at most once per agent — repeat
+  verifications by the same agent commit a verified TASK_ATTEMPT but no
+  LEDGER_ADJUST. Rationale: five observed days of unlimited repeat pay
+  produced rational bounty farming (20 verifications over 2 distinct
+  commissions, frontier flatlined). First-in-world ×3 unchanged;
+  cross-agent verification still pays base once. The shallow-replay
+  verifier enforces it (a re-paying adjust is a mismatch), and the rule is
+  stated on the task board (template p1.2).
 - **Cloud backend** (ratified at the user's request): `model.backend =
   "anthropic"` serves generation from the Anthropic API. The "no network in
   the sim loop" rule is refined to its actual intent: *agents* may never
