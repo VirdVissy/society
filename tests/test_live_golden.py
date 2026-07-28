@@ -38,13 +38,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 VALLEY_TOML = REPO_ROOT / "configs" / "valley.toml"
 
 # ---------------------------------------------------------------- pinned run
-GOLDEN_RUN_ID = "81cdd235ca15"
+GOLDEN_RUN_ID = "d51f1b8e132f"
 GOLDEN_DAYS = 4
 GOLDEN_ALIVE = 8
 GOLDEN_EVENTS = 856
 GOLDEN_HEAD_SEQ = GOLDEN_EVENTS - 1
-GOLDEN_HEAD_HASH = "48518044215c06822ddf8ed2a705f9ae9da9644ab83fe9baa85a8aa90e6ce07c"
-GOLDEN_FINAL_STATE_SHA = "4f943b278c10b40e21b27e6ec6de1eaffe060f3a2901a576b4fa48d4bff0fce3"
+GOLDEN_HEAD_HASH = "611c825ec12eece6f7a00055d19be7dcc07008a100b49c9bc65dc33f7f2e22d0"
+GOLDEN_FINAL_STATE_SHA = "3f86630f8d507a9fad76a523bb4cf3f5540120b0f4c922c841bd302ebdfdedf8"
 GOLDEN_KIND_COUNTS = {
     "run_started": 1,
     "agent_spawned": 8,
@@ -66,7 +66,7 @@ GOLDEN_MALFORMED_FORFEITS = 8  # one doubly-malformed pair per agent (>= 1 requi
 GOLDEN_RETRIES = 32
 GOLDEN_RETRY_RECOVERED = 24  # malformed/bad-location/float specials recover (>= 1 required)
 GOLDEN_LLM_CALLS = 320
-GOLDEN_USAGE_IN = 529493
+GOLDEN_USAGE_IN = 555500
 GOLDEN_USAGE_OUT = 5738
 
 # Payload key sets SPEC §9a will lock.

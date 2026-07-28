@@ -36,7 +36,7 @@ VALLEY_TOML = _CONFIGS / "valley.toml"
 
 # Pinned 2026-07-23 (computed once, then frozen — see module docstring).
 PHASE0_WORLD_CONFIG_SHA = "24cbbf0eaf5426eb509b8bd1b755c18877e4e9822644e180bc85dd72aa5c66cb"
-VALLEY_LIVE_CONFIG_SHA = "3723764d194f562ec05017032f1e826d1b4ad0bc9efd5dac40ce1f0feb86d05b"
+VALLEY_LIVE_CONFIG_SHA = "f6f6bbd348e03d8a174c2047c37fbeb5a33186e27a18ef60e17eb5ff39a47cc2"
 
 
 def _variant(tmp_path: Path, transform: Callable[[str], str]) -> Path:
@@ -81,7 +81,7 @@ def test_load_canonical_valley_toml_every_field() -> None:
     }
     assert cfg.economy.starting_stones == 20
     assert cfg.economy.bounties == [10, 25, 60, 150, 400]
-    assert cfg.economy.materials == [1, 2, 5, 12, 30]
+    assert cfg.economy.materials == [0, 2, 5, 12, 30]
     assert cfg.economy.stub_success_permille == [500, 250, 120, 50, 15]
     # Phase-1 sections.
     assert cfg.model.backend == "mlx"

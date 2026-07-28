@@ -39,6 +39,7 @@ def _cfg(
     allowance: int | None = None,
     qi_max: int | None = None,
     starting_stones: int | None = None,
+    materials: list[int] | None = None,
 ):
     cfg = load_live_config(VALLEY_TOML)
     update = {
@@ -55,6 +56,9 @@ def _cfg(
         update["qi"] = cfg.qi.model_copy(update=qi_update)
     if starting_stones is not None:
         update["economy"] = cfg.economy.model_copy(update={"starting_stones": starting_stones})
+    if materials is not None:
+        base = update.get("economy", cfg.economy)
+        update["economy"] = base.model_copy(update={"materials": materials})
     return cfg.model_copy(update=update)
 
 
@@ -133,7 +137,7 @@ def test_first_in_world_multiplier_exactly_once_per_task(tmp_path):
     the other agent's first verification pays base; and each agent's DAY-2
     repeat pays NOTHING (the board honors each commission once per
     cultivator — the anti-farming rule from the acceptance-run finding)."""
-    cfg = _cfg(founders=2, days=2, rounds=1)
+    cfg = _cfg(founders=2, days=2, rounds=1, materials=[1, 2, 5, 12, 30])
     task_id, steps = _tier1_recipe(cfg)
 
     def script(prompt, params):
@@ -210,7 +214,7 @@ def trade_funnel_run(tmp_path_factory):
             return _act("trade", target="Bo Shan", stones=1)  # traveled away
         return _act("meditate")
 
-    cfg = _cfg(founders=3, days=2, rounds=3, qi_max=4000)
+    cfg = _cfg(founders=3, days=2, rounds=3, qi_max=5200, materials=[1, 2, 5, 12, 30])
     run_dir = tmp_path_factory.mktemp("trade-funnel") / "run"
     summary = run_live(cfg, run_dir, config_path=None, backend=ScriptedBackend(script))
     return cfg, run_dir, summary, _events(run_dir)
@@ -292,7 +296,7 @@ def test_trade_funnel_replays(trade_funnel_run):
 
 
 def test_experiment_stone_poverty_degrades_with_wanted_payload(tmp_path):
-    cfg = _cfg(founders=1, days=1, rounds=1, starting_stones=0)
+    cfg = _cfg(founders=1, days=1, rounds=1, starting_stones=0, materials=[1, 2, 5, 12, 30])
     task_id, steps = _tier1_recipe(cfg)
 
     def script(prompt, params):

@@ -34,7 +34,7 @@ rest = 0
 [economy]
 starting_stones = 20
 bounties = [10, 25, 60, 150, 400]
-materials = [1, 2, 5, 12, 30]
+materials = [0, 2, 5, 12, 30]  # tier-1 free: the learning tier must never poverty-lock
 stub_success_permille = [500, 250, 120, 50, 15]  # unused in live mode; schema-required
 
 [model]
