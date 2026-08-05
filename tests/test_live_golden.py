@@ -41,10 +41,10 @@ VALLEY_TOML = REPO_ROOT / "configs" / "valley.toml"
 GOLDEN_RUN_ID = "d51f1b8e132f"
 GOLDEN_DAYS = 4
 GOLDEN_ALIVE = 8
-GOLDEN_EVENTS = 856
+GOLDEN_EVENTS = 858
 GOLDEN_HEAD_SEQ = GOLDEN_EVENTS - 1
-GOLDEN_HEAD_HASH = "ba974504e6ede44211f62073c4f925a0f6440a3b2611b106a6bb54e3135dd5cf"
-GOLDEN_FINAL_STATE_SHA = "b30febf36a655f9c0570e7990c4688f7b9cc76866647465bfac284211f86717a"
+GOLDEN_HEAD_HASH = "672eb1d702c43a7f5d2ad83224be2b16a8d561d92e722454772aee9d82ff32cf"
+GOLDEN_FINAL_STATE_SHA = "0b27c060c16a99c807157e4d4c739831cf6dc2b28dff15c5aa48b290e29b6529"
 GOLDEN_KIND_COUNTS = {
     "run_started": 1,
     "agent_spawned": 8,
@@ -54,20 +54,20 @@ GOLDEN_KIND_COUNTS = {
     "llm_call": 320,
     "task_attempt": 146,
     "reflection": 32,
-    "ledger_adjust": 72,  # 64 bounties (once per cultivator: 8 agents x 8 tasks) + 8 trades
+    "ledger_adjust": 74,  # 66 auto-claims (incl. 2 tier-2 via satchel) + 8 trades
     "run_finished": 1,
 }
 GOLDEN_ATTEMPTS = 146
-GOLDEN_DISCOVERIES = 81  # verified attempts (agents re-verify each other's tasks)
-GOLDEN_DISTINCT_DISCOVERIES = 8  # every tier-1 commission found; pins must be interesting (>= 3)
-GOLDEN_FIRST_DISCOVERIES = 8
+GOLDEN_DISCOVERIES = 66  # auto-claims (once per cultivator per commission)
+GOLDEN_DISTINCT_DISCOVERIES = 9  # all 8 tier-1 + 1 tier-2 (satchel-crafted); >= 3 required
+GOLDEN_FIRST_DISCOVERIES = 9
 GOLDEN_DEGRADED = 8
 GOLDEN_MALFORMED_FORFEITS = 8  # one doubly-malformed pair per agent (>= 1 required)
 GOLDEN_RETRIES = 32
 GOLDEN_RETRY_RECOVERED = 24  # malformed/bad-location/float specials recover (>= 1 required)
 GOLDEN_LLM_CALLS = 320
-GOLDEN_USAGE_IN = 562566
-GOLDEN_USAGE_OUT = 5738
+GOLDEN_USAGE_IN = 535192
+GOLDEN_USAGE_OUT = 4960
 
 # Payload key sets SPEC §9a will lock.
 RUN_STARTED_KEYS = {
@@ -95,15 +95,13 @@ LLM_CALL_KEYS = {
     "usage_out",
 }
 TASK_ATTEMPT_KEYS = {
-    "task_id",
-    "tier",
     "steps",
-    "verified",
-    "product",
     "step_products",
     "message",
-    "first_in_world",
+    "claims",
 }
+CLAIM_KEYS = {"task_id", "tier", "first"}
+BOUNTY_ADJUST_KEYS = {"reason", "task_id", "tier", "first"}
 
 
 def golden_cfg():
@@ -201,15 +199,19 @@ def test_layout_and_payload_key_sets(golden_run):
             assert ev.qi_delta < 0
         elif ev.kind is EventKind.TASK_ATTEMPT:
             assert set(ev.payload) == TASK_ATTEMPT_KEYS
+            assert all(set(c) == CLAIM_KEYS for c in ev.payload["claims"])
             assert (ev.qi_delta, ev.stones_delta) == (0, 0)
         elif ev.kind is EventKind.REFLECTION:
             assert set(ev.payload) == {"text"}
             assert (ev.qi_delta, ev.stones_delta) == (0, 0)
         elif ev.kind is EventKind.LEDGER_ADJUST:
             if ev.payload["reason"] == "bounty":
-                assert set(ev.payload) == {"reason", "tier", "first"}
+                assert set(ev.payload) == BOUNTY_ADJUST_KEYS
                 multiplier = cfg.live.first_discovery_multiplier if ev.payload["first"] else 1
-                assert ev.stones_delta == cfg.economy.bounties[ev.payload["tier"] - 1] * multiplier
+                tier = ev.payload["tier"]
+                assert ev.stones_delta == (
+                    cfg.economy.bounties[tier - 1] * multiplier - cfg.economy.materials[tier - 1]
+                )
             else:
                 assert set(ev.payload) == {"reason", "from"}
                 assert ev.payload["reason"] == "trade"
@@ -226,9 +228,11 @@ def test_layout_and_payload_key_sets(golden_run):
 def test_first_in_world_unique_per_task(golden_run):
     _, _, _, events = golden_run
     firsts = [
-        ev.payload["task_id"]
+        claim["task_id"]
         for ev in events
-        if ev.kind is EventKind.TASK_ATTEMPT and ev.payload["first_in_world"]
+        if ev.kind is EventKind.TASK_ATTEMPT
+        for claim in ev.payload["claims"]
+        if claim["first"]
     ]
     assert len(firsts) == len(set(firsts)) == GOLDEN_FIRST_DISCOVERIES
 

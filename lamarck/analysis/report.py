@@ -20,7 +20,7 @@ report.json layout (all counts ints; no wall time anywhere):
   (degraded with reason "malformed"), ``utterances`` (non-degraded
   converse), ``notes_written`` (non-degraded note), ``tokens_in/out``.
 - ``discoveries``: verified TASK_ATTEMPT rows in commit order —
-  ``day, agent_id, name, task_id, product`` (the attempt's recorded final
+  ``day, agent_id, name, task_id`` (one row per auto-claim; the claim's
   product), ``tier, first_in_world``.
 - ``distinct_verified`` + ``tier_histogram`` (str tier keys, sorted) over
   DISTINCT verified task_ids (a task's tier counted once, at its first
@@ -143,18 +143,20 @@ def _fold_report(events: list[EventRecord]) -> dict[str, Any]:
         elif ev.kind is EventKind.LEDGER_ADJUST:
             stats[ev.actor].fold_deltas(ev)
         elif ev.kind is EventKind.TASK_ATTEMPT:
-            if ev.payload.get("verified") is True:
-                task_id = str(ev.payload.get("task_id", ""))
-                tier = int(ev.payload.get("tier", 0))
+            claims = ev.payload.get("claims")
+            for claim in claims if isinstance(claims, list) else []:
+                if not isinstance(claim, dict):
+                    continue
+                task_id = str(claim.get("task_id", ""))
+                tier = int(claim.get("tier", 0))
                 discoveries.append(
                     {
                         "day": ev.day,
                         "agent_id": ev.actor,
                         "name": stats[ev.actor].name,
                         "task_id": task_id,
-                        "product": str(ev.payload.get("product", "")),
                         "tier": tier,
-                        "first_in_world": bool(ev.payload.get("first_in_world", False)),
+                        "first_in_world": bool(claim.get("first", False)),
                     }
                 )
                 if task_id not in verified_tiers:
@@ -216,13 +218,12 @@ def _render_md(data: dict[str, Any]) -> str:
                 str(d["day"]),
                 f"{d['name']} ({d['agent_id']})",
                 d["task_id"],
-                d["product"],
                 str(d["tier"]),
                 "yes" if d["first_in_world"] else "no",
             ]
             for d in data["discoveries"]
         ]
-        lines.extend(_md_table(["day", "agent", "task", "product", "tier", "first"], rows))
+        lines.extend(_md_table(["day", "agent", "task", "tier", "first"], rows))
     else:
         lines.append("(none)")
     lines.extend(["", "## Tier histogram (distinct verified)", ""])

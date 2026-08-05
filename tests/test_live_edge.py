@@ -131,12 +131,12 @@ def test_allowance_exhaustion_skips_thinking_and_reflection(tmp_path):
 # ------------------------------------------------------------- first-in-world
 
 
-def test_first_in_world_multiplier_exactly_once_per_task(tmp_path):
-    """Two agents verify the SAME commission across two days: only the
-    chronologically first attempt carries first_in_world and the x3 bounty;
-    the other agent's first verification pays base; and each agent's DAY-2
-    repeat pays NOTHING (the board honors each commission once per
-    cultivator — the anti-farming rule from the acceptance-run finding)."""
+def test_auto_claim_pays_first_per_cultivator_with_multiplier(tmp_path):
+    """Two agents craft the SAME compound across two days (auto-claim rule):
+    the chronologically first production claims first-in-world (x3, net of
+    materials); the other agent's first production claims base pay; each
+    agent's DAY-2 repeat yields NO claim (once per cultivator) — and none
+    of them ever names a commission."""
     cfg = _cfg(founders=2, days=2, rounds=1, materials=[1, 2, 5, 12, 30])
     task_id, steps = _tier1_recipe(cfg)
 
@@ -145,30 +145,33 @@ def test_first_in_world_multiplier_exactly_once_per_task(tmp_path):
         if dusk:
             return "the crucible cools"
         assert not retry, "the scripted experiment must be valid"
-        return _act("experiment", task_id=task_id, steps=steps)
+        return _act("experiment", steps=steps)
 
     summary = run_live(cfg, tmp_path / "run", config_path=None, backend=ScriptedBackend(script))
     assert summary.attempts == 4  # 2 agents x 2 days x 1 round
-    assert summary.discoveries == 4
+    assert summary.discoveries == 2  # one claim per cultivator, ever
     assert summary.distinct_discoveries == 1
     assert summary.first_discoveries == 1
 
     events = _events(tmp_path / "run")
     attempts = [ev for ev in events if ev.kind is EventKind.TASK_ATTEMPT]
-    assert [ev.payload["verified"] for ev in attempts] == [True] * 4
-    assert [ev.payload["first_in_world"] for ev in attempts] == [True, False, False, False]
+    claim_counts = [len(ev.payload["claims"]) for ev in attempts]
+    assert claim_counts == [1, 1, 0, 0]  # day-2 repeats claim nothing
+    assert [c["first"] for ev in attempts[:2] for c in ev.payload["claims"]] == [True, False]
+    assert all(c["task_id"] == task_id for ev in attempts[:2] for c in ev.payload["claims"])
+    assert "The board pays" in attempts[0].payload["message"]
+    assert "The board pays" not in attempts[2].payload["message"]
     adjusts = [
         ev
         for ev in events
         if ev.kind is EventKind.LEDGER_ADJUST and ev.payload["reason"] == "bounty"
     ]
-    base = cfg.economy.bounties[0]
-    # Day 1: first-in-world x3 for the first agent, base for the second.
-    # Day 2: both repeats verified but UNPAID (once per cultivator).
-    assert [ev.stones_delta for ev in adjusts] == [base * 3, base]
+    base, materials = cfg.economy.bounties[0], cfg.economy.materials[0]
+    mult = cfg.live.first_discovery_multiplier
+    # Net pay: bounty * multiplier - materials (paid on delivery).
+    assert [ev.stones_delta for ev in adjusts] == [base * mult - materials, base - materials]
     assert [ev.payload["first"] for ev in adjusts] == [True, False]
-    # The first verifier is whoever the scheduler shuffled first; the second
-    # agent's day-0 verification already pays base.
+    assert [ev.payload["task_id"] for ev in adjusts] == [task_id, task_id]
     assert adjusts[0].actor != adjusts[1].actor
     assert replay_live(tmp_path / "run").ok
 
@@ -295,32 +298,38 @@ def test_trade_funnel_replays(trade_funnel_run):
 # ------------------------------------------------------ stone-poverty degrade
 
 
-def test_experiment_stone_poverty_degrades_with_wanted_payload(tmp_path):
+def test_experiment_never_stone_gated_and_pays_net(tmp_path):
+    """Auto-claim rule: a broke cultivator can still experiment (materials
+    are netted out of the bounty on delivery, never charged upfront), and
+    the ACTION event carries no stones delta at all."""
     cfg = _cfg(founders=1, days=1, rounds=1, starting_stones=0, materials=[1, 2, 5, 12, 30])
     task_id, steps = _tier1_recipe(cfg)
 
     def script(prompt, params):
         _, _, _, dusk, retry = _ctx(prompt)
         if dusk:
-            return "no stones, no alchemy"
-        assert not retry, "a valid-but-unaffordable action must not retry"
-        return _act("experiment", task_id=task_id, steps=steps)
+            return "no stones, yet alchemy"
+        assert not retry, "the scripted experiment must be valid"
+        return _act("experiment", steps=steps)
 
     summary = run_live(cfg, tmp_path / "run", config_path=None, backend=ScriptedBackend(script))
-    assert summary.attempts == 0
-    assert summary.degraded == 1
-    assert summary.retries == 0
+    assert summary.attempts == 1
+    assert summary.degraded == 0
+    assert summary.discoveries == 1
 
     events = _events(tmp_path / "run")
-    assert not [ev for ev in events if ev.kind is EventKind.TASK_ATTEMPT]
     actions = [ev for ev in events if ev.kind is EventKind.ACTION]
-    assert len(actions) == 1
-    assert actions[0].payload == {
-        "type": "rest",
-        "degraded": True,
-        "wanted": {"type": "experiment", "task_id": task_id, "steps": steps},
-    }
-    assert (actions[0].qi_delta, actions[0].stones_delta) == (0, 0)  # rest surcharge is 0
+    assert actions[0].payload == {"type": "experiment", "steps": steps}
+    assert actions[0].stones_delta == 0  # no upfront materials, ever
+    adjusts = [
+        ev
+        for ev in events
+        if ev.kind is EventKind.LEDGER_ADJUST and ev.payload["reason"] == "bounty"
+    ]
+    net = cfg.economy.bounties[0] * cfg.live.first_discovery_multiplier - cfg.economy.materials[0]
+    assert [ev.stones_delta for ev in adjusts] == [net]
+    assert adjusts[0].payload["task_id"] == task_id
+    assert replay_live(tmp_path / "run").ok
 
 
 # --------------------------------------------------- deep replay's sha teeth

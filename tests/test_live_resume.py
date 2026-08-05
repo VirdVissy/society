@@ -122,11 +122,11 @@ def test_resumed_run_deep_replay_reproduces_head(interrupted_run: Path) -> None:
 def test_resumed_summary_counters_match_refold(interrupted_run: Path) -> None:
     events = _events(interrupted_run)
     attempts = [ev for ev in events if ev.kind is EventKind.TASK_ATTEMPT]
-    verified = [ev for ev in attempts if ev.payload["verified"]]
+    claims = [c for ev in attempts for c in ev.payload["claims"]]
     resumed_again = pytest.raises(ValueError, resume_live, interrupted_run)
     assert "already finished" in str(resumed_again.value)
     assert len(attempts) >= 100  # the society stayed busy across the seam
-    assert {ev.payload["task_id"] for ev in verified}  # and kept discovering
+    assert {c["task_id"] for c in claims}  # and kept discovering
 
 
 def test_resume_refuses_config_drift(tmp_path: Path, partial_run: Path) -> None:

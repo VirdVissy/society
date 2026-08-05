@@ -20,22 +20,21 @@ from lamarck.mind.parser import ParseFailure, parse_action, retry_message
 VALID_CASES: list[tuple[str, str, ActionType, dict[str, object]]] = [
     (
         "experiment",
-        '{"action": "experiment", "task_id": "w1-01", "steps": [["cinnabar", "ash"]]}',
+        '{"action": "experiment", "steps": [["cinnabar", "ash"]]}',
         ActionType.EXPERIMENT,
-        {"task_id": "w1-01", "steps": [["cinnabar", "ash"]]},
+        {"steps": [["cinnabar", "ash"]]},
     ),
     (
         "experiment-multi-step",
-        '{"action": "experiment", "task_id": "w3-02", '
-        '"steps": [["a", "b"], ["ab", "c"], ["abc", "d"]]}',
+        '{"action": "experiment", "steps": [["a", "b"], ["ab", "c"], ["abc", "d"]]}',
         ActionType.EXPERIMENT,
-        {"task_id": "w3-02", "steps": [["a", "b"], ["ab", "c"], ["abc", "d"]]},
+        {"steps": [["a", "b"], ["ab", "c"], ["abc", "d"]]},
     ),
     (
         "experiment-empty-steps",  # structurally valid; the universe judges semantics
-        '{"action": "experiment", "task_id": "w1-01", "steps": []}',
+        '{"action": "experiment", "steps": []}',
         ActionType.EXPERIMENT,
-        {"task_id": "w1-01", "steps": []},
+        {"steps": []},
     ),
     (
         "converse",
@@ -190,7 +189,7 @@ INVALID_CASES: list[tuple[str, str, str]] = [
     ),
     (
         "nan-in-steps",
-        '{"action": "experiment", "task_id": "t", "steps": [NaN]}',
+        '{"action": "experiment", "steps": [NaN]}',
         "floats are not allowed",
     ),
     # ------------------------------------------------------- action field
@@ -218,15 +217,15 @@ INVALID_CASES: list[tuple[str, str, str]] = [
     ("missing-key-travel", '{"action": "travel"}', "missing key 'to' for travel"),
     (
         "missing-key-experiment",
-        '{"action": "experiment", "task_id": "w1-01"}',
+        '{"action": "experiment"}',
         "missing key 'steps' for experiment",
     ),
     ("missing-key-trade", '{"action": "trade", "target": "x"}', "missing key 'stones' for trade"),
     # ---------------------------------------------------------- field types
     (
-        "task-id-not-string",
-        '{"action": "experiment", "task_id": 5, "steps": []}',
-        "experiment.task_id must be a string",
+        "task-id-unknown-key",
+        '{"action": "experiment", "task_id": "w1-01", "steps": []}',
+        "unknown key 'task_id' for experiment",
     ),
     (
         "converse-text-not-string",
@@ -259,32 +258,32 @@ INVALID_CASES: list[tuple[str, str, str]] = [
     # --------------------------------------------------------- steps shape
     (
         "steps-not-list",
-        '{"action": "experiment", "task_id": "t", "steps": "ab"}',
+        '{"action": "experiment", "steps": "ab"}',
         "experiment.steps must be a list of [a, b] pairs",
     ),
     (
         "steps-inner-not-list",
-        '{"action": "experiment", "task_id": "t", "steps": ["ab"]}',
+        '{"action": "experiment", "steps": ["ab"]}',
         "experiment.steps must be a list of [a, b] pairs",
     ),
     (
         "steps-pair-too-short",
-        '{"action": "experiment", "task_id": "t", "steps": [["a"]]}',
+        '{"action": "experiment", "steps": [["a"]]}',
         "experiment.steps must be a list of [a, b] pairs",
     ),
     (
         "steps-pair-too-long",
-        '{"action": "experiment", "task_id": "t", "steps": [["a", "b", "c"]]}',
+        '{"action": "experiment", "steps": [["a", "b", "c"]]}',
         "experiment.steps must be a list of [a, b] pairs",
     ),
     (
         "steps-non-string-entry",
-        '{"action": "experiment", "task_id": "t", "steps": [["a", 2]]}',
+        '{"action": "experiment", "steps": [["a", 2]]}',
         "experiment.steps must be a list of [a, b] pairs",
     ),
     (
         "steps-nested-too-deep",
-        '{"action": "experiment", "task_id": "t", "steps": [[["a"], "b"]]}',
+        '{"action": "experiment", "steps": [[["a"], "b"]]}',
         "experiment.steps must be a list of [a, b] pairs",
     ),
     # ---------------------------------------------------------- note limit

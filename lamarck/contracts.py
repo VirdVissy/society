@@ -424,20 +424,36 @@ class AuditReport(BaseModel):
     notes: list[str]
 
 
+class CraftResult(BaseModel):
+    """What one crafting attempt physically did — no commission semantics.
+
+    The auto-claim rule (ratified 2026-08-06): the ENGINE maps produced
+    compounds to board commissions via public titles and pays each
+    first-per-cultivator claim; the universe only cooks. ``message`` is the
+    deterministic in-fiction verdict naming only submitted ingredients and
+    their products."""
+
+    model_config = ConfigDict(frozen=True)
+
+    step_products: list[str]
+    message: str
+
+
 class UniverseP(Protocol):
     """A problem domain with an instant, incorruptible, DETERMINISTIC
-    verifier. Hidden rules must never appear in any prompt. ``attempt`` is a
-    pure function of (task_id, submission, available) — Phase 1 universes
-    take no rng (deviation from PLAN §3.4, determinism-first; recorded in
-    SPEC). ``available`` is the attempter's SATCHEL (deviation ratified
-    2026-08-05 after the inventory-fallacy finding): compounds the caller
-    certifies the agent has produced before this attempt. The engine owns
-    satchel truth (folded from the event log); the universe only honors it
-    as extra usable ingredient names alongside bases and earlier-step
-    products of the same attempt."""
+    verifier. Hidden rules must never appear in any prompt. Both methods are
+    pure functions of their arguments — Phase 1 universes take no rng
+    (deviation from PLAN §3.4, determinism-first; recorded in SPEC).
+    ``available`` is the attempter's SATCHEL (2026-08-05): compounds the
+    caller certifies the agent produced before this attempt; usable names
+    are bases ∪ available ∪ earlier-step products of the same attempt.
+    ``craft`` executes steps with no commission in sight (the auto-claim
+    engine rule, 2026-08-06); ``attempt`` remains the task-scoped verifier
+    used by audits and tests."""
 
     def manifest(self) -> UniverseManifest: ...
     def tasks(self, tier: int) -> list[TaskStub]: ...
+    def craft(self, submission: Submission, available: frozenset[str]) -> CraftResult: ...
     def attempt(
         self, task_id: str, submission: Submission, available: frozenset[str]
     ) -> Outcome: ...
@@ -574,6 +590,7 @@ __all__ = [
     "Outcome",
     "UniverseManifest",
     "AuditReport",
+    "CraftResult",
     "UniverseP",
     "PersonaCard",
     "HeardUtterance",

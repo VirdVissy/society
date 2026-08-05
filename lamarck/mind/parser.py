@@ -55,7 +55,7 @@ class ParseFailure(BaseModel):
 
 # Allowed argument keys per action ("action" itself is always allowed).
 _ARG_KEYS: dict[ActionType, tuple[str, ...]] = {
-    ActionType.EXPERIMENT: ("task_id", "steps"),
+    ActionType.EXPERIMENT: ("steps",),
     ActionType.CONVERSE: ("target", "text"),
     ActionType.TEACH: (),
     ActionType.STUDY: (),
@@ -70,7 +70,6 @@ _ARG_KEYS: dict[ActionType, tuple[str, ...]] = {
 
 # Fields that must be strings, per action.
 _STR_FIELDS: dict[ActionType, tuple[str, ...]] = {
-    ActionType.EXPERIMENT: ("task_id",),
     ActionType.CONVERSE: ("target", "text"),
     ActionType.TRADE: ("target",),
     ActionType.NOTE: ("text",),
@@ -212,7 +211,7 @@ def retry_message(failure: ParseFailure) -> str:
         f"Your reply was invalid: {failure.reason}.\n"
         'Reply with exactly one JSON object {"action": "<action>", ...} where <action> is one of: '
         f"{_ACTION_VALUES}.\n"
-        'Args: experiment {"task_id", "steps": [["a", "b"], ...]}; converse {"target", "text"}; '
+        'Args: experiment {"steps": [["a", "b"], ...]}; converse {"target", "text"}; '
         'travel {"to"}; trade {"target", "stones" > 0}; '
         f'note {{"text" <= {NOTE_MAX_CHARS} chars}}; all other actions take none.'
     )

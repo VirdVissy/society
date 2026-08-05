@@ -76,7 +76,7 @@ COGNITION LOOP (one ACTION slot; every payload key set pinned here)
    COMMITTED record's ``response`` (NFC truth) is what the parser consumes.
 4. Parse + SEMANTIC VALIDATION (runner-owned; every failure produces an
    agent-readable reason fed to ``retry_message``):
-   - experiment: ``task_id`` must be on the board;
+   - experiment: no semantic validation (auto-claim rule: steps only);
    - travel: ``to`` must be a configured location AND != current (the
      "to != current" rule lives HERE; the world fold only checks
      membership);
@@ -100,12 +100,16 @@ COGNITION LOOP (one ACTION slot; every payload key set pinned here)
    ACTION ``{type, **args}`` with ``qi_delta = -cost`` and ``stones_delta``
    = ``-materials[tier-1]`` (experiment) / ``-stones`` (trade) / 0.
 7. Post-action, world-emitted events (actor = agent):
-   - experiment: ``universe.attempt`` then TASK_ATTEMPT ``{task_id, tier,
-     steps, verified, product, step_products, message, first_in_world}``
-     (zero deltas; ``first_in_world`` = verified AND no prior verified
-     attempt of this task_id by anyone). Verified: LEDGER_ADJUST
-     ``{reason: "bounty", tier, first}`` crediting ``bounties[tier-1] *
-     (live.first_discovery_multiplier if first else 1)`` stones.
+   - experiment (AUTO-CLAIM, 2026-08-06): ``universe.craft`` then
+     TASK_ATTEMPT ``{steps, step_products, message, claims: [{task_id,
+     tier, first}]}`` (zero deltas). Claims derive via ``_derive_claims``
+     (shared verbatim with the shallow-replay verifier): every produced
+     compound naming a commission this cultivator has not been paid for,
+     in step-product order. Each claim appends one net LEDGER_ADJUST
+     ``{reason: "bounty", task_id, tier, first}`` crediting
+     ``bounties[t-1] * (multiplier if first-in-world else 1) -
+     materials[t-1]`` (audited net-positive; materials are paid on
+     delivery, so upfront poverty cannot exist).
    - trade: LEDGER_ADJUST ``{reason: "trade", from: actor}`` crediting the
      target with the traded stones (actor = target agent id).
 Every committed record — markers included — is applied to the live ledgers
@@ -117,11 +121,11 @@ REPLAY
 Shallow (``replay_live(run_dir)``): verify_chain from genesis; exactly one
 RUN_FINISHED, last, matching the verified head; independent
 ``fold_balances`` refold reproduces ``final_state_sha``; every TASK_ATTEMPT
-re-verifies through a fresh universe built from the run's config (outcome
-fields byte-equal; ``message`` = outcome message + the deterministic
-``_board_notes_suffix`` recomputed by the same shared helper);
-``first_in_world`` flags re-derive from the log;
-bounty/trade LEDGER_ADJUST arithmetic and pairing re-check. Model-free.
+re-crafts through a fresh universe built from the run's config and
+re-derives claims via the same shared ``_derive_claims`` (step products,
+message, and the claims list must be byte-equal); each claim's net bounty
+adjust must follow back-to-back with exact payload and arithmetic;
+trade adjust pairing re-checks. Model-free.
 Deep (``deep=True``): all shallow checks, then RE-EXECUTE ``run_live``
 into a throwaway directory with a ``CachedBackend`` serving the recorded
 LLM_CALL events in order — each served call LMK_ASSERTs that the re-derived
@@ -140,7 +144,7 @@ from __future__ import annotations
 import re
 import tempfile
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -153,6 +157,7 @@ from lamarck.contracts import (
     SCHEMA_VERSION,
     WORLD_ACTOR,
     ActionType,
+    CraftResult,
     DayPhase,
     EventDraft,
     EventKind,
@@ -161,7 +166,6 @@ from lamarck.contracts import (
     GenResult,
     LiveWorldConfig,
     ModelBackendP,
-    Outcome,
     PerceptionView,
     PersonaCard,
     Submission,
@@ -227,7 +231,7 @@ class LiveRunSummary(BaseModel):
     stones_total: int
     attempts: int  # TASK_ATTEMPT events committed
     discoveries: int  # verified TASK_ATTEMPT events
-    distinct_discoveries: int  # distinct verified task_ids
+    distinct_discoveries: int  # distinct claimed commissions (any cultivator)
     first_discoveries: int  # first_in_world discoveries
     degraded: int  # every degraded ACTION (spent + malformed + wanted)
     spent_skips: int  # skip-think degradations (reason "spent")
@@ -661,13 +665,6 @@ class _LiveEngine:
         if isinstance(parsed, ParseFailure):
             return _Verdict(parsed, ActionType.REST, {}, 0, "")
         atype, args = parsed
-        if atype is ActionType.EXPERIMENT:
-            task_id = args["task_id"]
-            assert isinstance(task_id, str)  # parser-guaranteed
-            task = self.task_by_id.get(task_id)
-            if task is None:
-                return self._fail(f"there is no commission {task_id!r} on the task board")
-            return _Verdict(None, atype, args, task.tier, "")
         if atype is ActionType.TRAVEL:
             to = args["to"]
             assert isinstance(to, str)  # parser-guaranteed
@@ -768,12 +765,7 @@ class _LiveEngine:
         cost = cfg.qi.action_costs[atype]
         affordable = self.ledgers.allowance.can_spend(actor, cost)
         stones_delta = 0
-        if atype is ActionType.EXPERIMENT:
-            materials_cost = cfg.economy.materials[verdict.tier - 1]
-            if affordable and self.ledgers.balances().stones[actor] < materials_cost:
-                affordable = False
-            stones_delta = -materials_cost
-        elif atype is ActionType.TRADE:
+        if atype is ActionType.TRADE:
             traded = args["stones"]
             assert isinstance(traded, int)  # parser-guaranteed
             stones_delta = -traded
@@ -797,7 +789,7 @@ class _LiveEngine:
         self.last_action[actor] = atype.value
 
         if atype is ActionType.EXPERIMENT:
-            self._experiment_followup(day, tick, actor, verdict, args)
+            self._experiment_followup(day, tick, actor, args)
         elif atype is ActionType.TRADE:
             traded = args["stones"]
             assert isinstance(traded, int)  # parser-guaranteed
@@ -813,26 +805,31 @@ class _LiveEngine:
             )
 
     def _experiment_followup(
-        self, day: int, tick: int, actor: str, verdict: _Verdict, args: dict[str, object]
+        self, day: int, tick: int, actor: str, args: dict[str, object]
     ) -> None:
-        """TASK_ATTEMPT (+ bounty LEDGER_ADJUST on verification)."""
-        task_id = args["task_id"]
-        assert isinstance(task_id, str)  # parser-guaranteed
+        """TASK_ATTEMPT + one net bounty LEDGER_ADJUST per auto-claim.
+
+        Auto-claim rule (2026-08-06): the universe cooks; the engine pays.
+        Every produced compound that (a) is a board commission's target and
+        (b) this cultivator has not claimed before becomes a claim, in
+        step-product order. Each claim credits ONE net adjust:
+        ``bounties[t-1] * (first-in-world multiplier) - materials[t-1]``
+        (always positive by config audit) — you pay for what you actually
+        cook, so upfront materials poverty cannot exist.
+        """
         submission = Submission.model_validate({"steps": args["steps"]})
         # Satchel BEFORE this attempt: the TASK_ATTEMPT event that updates it
         # commits after the universe's verdict, so read order is the rule.
-        outcome: Outcome = self.universe.attempt(
-            task_id, submission, frozenset(self.world.satchel(actor))
+        crafted = self.universe.craft(submission, frozenset(self.world.satchel(actor)))
+        claims, message = _derive_claims(
+            crafted,
+            actor,
+            self.task_by_product,
+            self.task_by_id,
+            self.bounties_paid,
+            self.first_verified,
+            self.cfg,
         )
-        LMK_ASSERT(
-            outcome.tier == verdict.tier,
-            "universe outcome tier disagrees with the task board",
-            task_id=task_id,
-            board=verdict.tier,
-            outcome=outcome.tier,
-        )
-        first = outcome.verified and task_id not in self.first_verified
-        message = outcome.message + _board_notes_suffix(outcome.step_products, self.task_by_product)
         self.commit(
             EventDraft(
                 day=day,
@@ -840,38 +837,40 @@ class _LiveEngine:
                 kind=EventKind.TASK_ATTEMPT,
                 actor=actor,
                 payload={
-                    "task_id": task_id,
-                    "tier": outcome.tier,
                     "steps": args["steps"],
-                    "verified": outcome.verified,
-                    "product": outcome.product,
-                    "step_products": list(outcome.step_products),
+                    "step_products": list(crafted.step_products),
                     "message": message,
-                    "first_in_world": first,
+                    "claims": [
+                        {"task_id": c.task_id, "tier": c.tier, "first": c.first} for c in claims
+                    ],
                 },
             )
         )
         self.attempts += 1
-        self.last_action[actor] = f"experiment {task_id} {'✓' if outcome.verified else '✗'}"
-        if outcome.verified:
-            if (actor, task_id) not in self.bounties_paid:
-                multiplier = self.cfg.live.first_discovery_multiplier if first else 1
-                self.commit(
-                    EventDraft(
-                        day=day,
-                        tick=tick,
-                        kind=EventKind.LEDGER_ADJUST,
-                        actor=actor,
-                        payload={"reason": "bounty", "tier": outcome.tier, "first": first},
-                        stones_delta=self.cfg.economy.bounties[outcome.tier - 1] * multiplier,
-                    )
+        mark = "✓" * len(claims) if claims else "✗"
+        self.last_action[actor] = f"experiment {mark}"
+        for claim in claims:
+            self.commit(
+                EventDraft(
+                    day=day,
+                    tick=tick,
+                    kind=EventKind.LEDGER_ADJUST,
+                    actor=actor,
+                    payload={
+                        "reason": "bounty",
+                        "task_id": claim.task_id,
+                        "tier": claim.tier,
+                        "first": claim.first,
+                    },
+                    stones_delta=claim.net_stones,
                 )
-                self.bounties_paid.add((actor, task_id))
+            )
+            self.bounties_paid.add((actor, claim.task_id))
             self.discoveries += 1
             self.discoveries_by_agent[actor] += 1
-            if first:
+            if claim.first:
                 self.first_discoveries += 1
-                self.first_verified.add(task_id)
+                self.first_verified.add(claim.task_id)
 
     # ------------------------------------------------------------------- dusk
 
@@ -1329,14 +1328,21 @@ def _rebuild_engine_state(engine: _LiveEngine, records: list[EventRecord]) -> in
             engine.last_action[ev.actor] = str(payload.get("type", "-"))
         elif ev.kind is EventKind.TASK_ATTEMPT:
             engine.attempts += 1
-            task_id = _payload_str(payload, "task_id", ev.seq)
-            if payload.get("verified"):
+            claims = payload.get("claims")
+            LMK_ASSERT(
+                isinstance(claims, list),
+                "TASK_ATTEMPT payload needs a claims list",
+                seq=ev.seq,
+            )
+            assert isinstance(claims, list)  # narrow for mypy; guaranteed above
+            for claim in claims:
+                task_id = str(claim["task_id"])
                 engine.discoveries += 1
                 engine.discoveries_by_agent[ev.actor] += 1
-                engine.first_verified.add(task_id)
                 engine.bounties_paid.add((ev.actor, task_id))
-                if payload.get("first_in_world"):
+                if claim.get("first"):
                     engine.first_discoveries += 1
+                    engine.first_verified.add(task_id)
     retried = [key for key, count in tick_calls.items() if count > 1]
     engine.retries = len(retried)
     engine.retry_recovered = sum(1 for key in retried if key not in tick_forfeited)
@@ -1376,29 +1382,32 @@ def _live_replay_failure(run_dir: Path, mode: str, *reasons: str) -> LiveReplayR
 def _reverify_attempts(
     events: list[EventRecord], cfg: LiveWorldConfig, mismatches: list[str]
 ) -> int:
-    """Re-verify every TASK_ATTEMPT through a fresh universe, re-derive
-    first_in_world flags, and re-check bounty/trade adjust arithmetic and
-    pairing. Returns the number of attempts checked."""
+    """Re-craft every TASK_ATTEMPT through a fresh universe, re-derive its
+    claims via the SAME ``_derive_claims`` the runner used, and require the
+    exact expected bounty adjusts to follow it back-to-back. Returns the
+    number of attempts checked."""
     universe = WuxingUniverse(cfg.universe.seed, cfg.universe.tiers)
-    task_by_product = _task_by_product(
-        stub for tier in range(1, cfg.universe.tiers + 1) for stub in universe.tasks(tier)
-    )
-    seen_verified: set[str] = set()  # membership only; never iterated
+    board = [stub for tier in range(1, cfg.universe.tiers + 1) for stub in universe.tasks(tier)]
+    task_by_product = _task_by_product(board)
+    task_by_id = {stub.task_id: stub for stub in board}
+    first_verified: set[str] = set()  # membership only; never iterated
     paid_pairs: set[tuple[str, str]] = set()  # (actor, task_id); once-per-cultivator rule
     # Satchel refold (mirrors WorldStateFold's rule with the same read order:
     # the satchel an attempt sees excludes that attempt's own products).
     satchels: dict[str, set[str]] = {}
+    # Bounty adjusts must trail their attempt back-to-back, in claim order.
+    pending: list[tuple[str, _Claim]] = []  # (actor, expected claim)
     checked = 0
     prev: EventRecord | None = None
     for ev in events:
+        if ev.kind is not EventKind.LEDGER_ADJUST and pending:
+            mismatches.append(
+                f"{len(pending)} expected bounty adjust(s) missing before seq {ev.seq}"
+            )
+            pending.clear()
         if ev.kind is EventKind.TASK_ATTEMPT:
             checked += 1
             payload = ev.payload
-            task_id = payload.get("task_id")
-            if not isinstance(task_id, str):
-                mismatches.append(f"task_attempt at seq {ev.seq} lacks a str task_id")
-                prev = ev
-                continue
             try:
                 submission = Submission.model_validate({"steps": payload.get("steps")})
             except ValidationError as err:
@@ -1408,17 +1417,19 @@ def _reverify_attempts(
                 prev = ev
                 continue
             satchel = satchels.setdefault(ev.actor, set())
-            outcome = universe.attempt(task_id, submission, frozenset(satchel))
-            for product in outcome.step_products:
+            crafted = universe.craft(submission, frozenset(satchel))
+            claims, message = _derive_claims(
+                crafted, ev.actor, task_by_product, task_by_id, paid_pairs, first_verified, cfg
+            )
+            for product in crafted.step_products:
                 if product != "slag":
                     satchel.add(product)
             expected: dict[str, Any] = {
-                "verified": outcome.verified,
-                "product": outcome.product,
-                "tier": outcome.tier,
-                "step_products": list(outcome.step_products),
-                "message": outcome.message
-                + _board_notes_suffix(outcome.step_products, task_by_product),
+                "step_products": list(crafted.step_products),
+                "message": message,
+                "claims": [
+                    {"task_id": c.task_id, "tier": c.tier, "first": c.first} for c in claims
+                ],
             }
             got = {key: payload.get(key) for key in expected}
             if got != expected:
@@ -1426,31 +1437,44 @@ def _reverify_attempts(
                     f"task_attempt at seq {ev.seq} does not re-verify: "
                     f"recorded {got} != recomputed {expected}"
                 )
-            expected_first = outcome.verified and task_id not in seen_verified
-            if payload.get("first_in_world") != expected_first:
-                mismatches.append(
-                    f"task_attempt at seq {ev.seq} first_in_world flag is "
-                    f"{payload.get('first_in_world')!r}, refold says {expected_first}"
-                )
-            if outcome.verified:
-                seen_verified.add(task_id)
+            for claim in claims:
+                paid_pairs.add((ev.actor, claim.task_id))
+                if claim.first:
+                    first_verified.add(claim.task_id)
+                pending.append((ev.actor, claim))
         elif ev.kind is EventKind.LEDGER_ADJUST:
             reason = ev.payload.get("reason")
             if reason == "bounty":
-                _check_bounty_adjust(ev, prev, cfg, mismatches)
-                if prev is not None and prev.kind is EventKind.TASK_ATTEMPT:
-                    pair = (ev.actor, str(prev.payload.get("task_id")))
-                    if pair in paid_pairs:
+                if not pending:
+                    mismatches.append(
+                        f"bounty adjust at seq {ev.seq} does not follow a claiming attempt"
+                    )
+                else:
+                    actor, claim = pending.pop(0)
+                    expected_payload = {
+                        "reason": "bounty",
+                        "task_id": claim.task_id,
+                        "tier": claim.tier,
+                        "first": claim.first,
+                    }
+                    if (
+                        ev.actor != actor
+                        or ev.payload != expected_payload
+                        or ev.stones_delta != claim.net_stones
+                    ):
                         mismatches.append(
-                            f"bounty adjust at seq {ev.seq} re-pays {pair!r}: the board "
-                            "honors each commission once per cultivator"
+                            f"bounty adjust at seq {ev.seq} disagrees with the refolded "
+                            f"claim: got actor={ev.actor!r} payload={ev.payload} "
+                            f"delta={ev.stones_delta}, expected actor={actor!r} "
+                            f"payload={expected_payload} delta={claim.net_stones}"
                         )
-                    paid_pairs.add(pair)
             elif reason == "trade":
                 _check_trade_adjust(ev, prev, mismatches)
             else:
                 mismatches.append(f"ledger_adjust at seq {ev.seq} has unexpected reason {reason!r}")
         prev = ev
+    if pending:
+        mismatches.append(f"{len(pending)} expected bounty adjust(s) missing at end of log")
     return checked
 
 
@@ -1470,58 +1494,53 @@ def _task_by_product(board: Iterable[TaskStub]) -> dict[str, str]:
     return mapping
 
 
-def _board_notes_suffix(step_products: Sequence[str], task_by_product: dict[str, str]) -> str:
-    """The board's cross-reference appended to attempt messages: which
-    commission pays for each product the attempt yielded.
+class _Claim(NamedTuple):
+    """One auto-claim: a commission paid because its compound was produced."""
 
-    Joins two facts the prompts already display separately (what you made;
-    what the board pays for) — the acceptance-run diagnosis showed agents
-    producing every tier-1 compound while filing only 2 commissions because
-    this link went unmade. Deterministic: first-appearance order, deduped,
-    "slag" and unknown names skipped; empty string when nothing matches.
-    The shallow-replay verifier recomputes it with this same function.
+    task_id: str
+    tier: int
+    first: bool
+    net_stones: int  # bounty * (first multiplier) - materials, always > 0
+
+
+def _derive_claims(
+    crafted: CraftResult,
+    actor: str,
+    task_by_product: dict[str, str],
+    task_by_id: dict[str, TaskStub],
+    bounties_paid: set[tuple[str, str]],
+    first_verified: set[str],
+    cfg: LiveWorldConfig,
+) -> tuple[list[_Claim], str]:
+    """The auto-claim rule, shared VERBATIM by the runner and the
+    shallow-replay verifier (symmetry: they cannot diverge).
+
+    A claim arises for every produced compound that names a board commission
+    this cultivator has not been paid for, in step-product order, deduped
+    within the attempt. ``net_stones = bounties[t-1] * (multiplier if
+    first-in-world else 1) - materials[t-1]`` — you pay for what you cook.
+    The returned message appends one deterministic payment sentence per
+    claim to the craft verdict. The caller owns mutating the paid/first
+    sets AFTER committing (this function only reads them).
     """
-    noted: list[str] = []
+    claims: list[_Claim] = []
     seen: set[str] = set()
-    for product in step_products:
-        if product in seen or product == "slag" or product not in task_by_product:
+    sentences: list[str] = []
+    for product in crafted.step_products:
+        if product in seen or product not in task_by_product:
             continue
         seen.add(product)
-        noted.append(f"{product} fulfills {task_by_product[product]}")
-    if not noted:
-        return ""
-    return " The board notes: " + "; ".join(noted) + "."
-
-
-def _check_bounty_adjust(
-    ev: EventRecord, prev: EventRecord | None, cfg: LiveWorldConfig, mismatches: list[str]
-) -> None:
-    tier = ev.payload.get("tier")
-    first = ev.payload.get("first")
-    if not (isinstance(tier, int) and not isinstance(tier, bool) and 1 <= tier <= 5):
-        mismatches.append(f"bounty adjust at seq {ev.seq} has invalid tier {tier!r}")
-        return
-    if not isinstance(first, bool):
-        mismatches.append(f"bounty adjust at seq {ev.seq} lacks a bool 'first'")
-        return
-    multiplier = cfg.live.first_discovery_multiplier if first else 1
-    expected = cfg.economy.bounties[tier - 1] * multiplier
-    if ev.stones_delta != expected:
-        mismatches.append(
-            f"bounty adjust at seq {ev.seq} credits {ev.stones_delta}, "
-            f"config arithmetic says {expected}"
-        )
-    if (
-        prev is None
-        or prev.kind is not EventKind.TASK_ATTEMPT
-        or prev.actor != ev.actor
-        or prev.payload.get("verified") is not True
-        or prev.payload.get("tier") != tier
-        or prev.payload.get("first_in_world") != first
-    ):
-        mismatches.append(
-            f"bounty adjust at seq {ev.seq} is not paired with its verified task_attempt"
-        )
+        task_id = task_by_product[product]
+        if (actor, task_id) in bounties_paid:
+            continue
+        tier = task_by_id[task_id].tier
+        first = task_id not in first_verified and not any(c.task_id == task_id for c in claims)
+        multiplier = cfg.live.first_discovery_multiplier if first else 1
+        net = cfg.economy.bounties[tier - 1] * multiplier - cfg.economy.materials[tier - 1]
+        LMK_ASSERT(net > 0, "claim economics must be net positive", task_id=task_id, net=net)
+        claims.append(_Claim(task_id=task_id, tier=tier, first=first, net_stones=net))
+        sentences.append(f" The board pays {net} stones for {product} ({task_id}).")
+    return claims, crafted.message + "".join(sentences)
 
 
 def _check_trade_adjust(ev: EventRecord, prev: EventRecord | None, mismatches: list[str]) -> None:

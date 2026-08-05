@@ -79,13 +79,13 @@ def test_discoveries_table_matches_task_attempts(report_run):
             "day": ev.day,
             "agent_id": ev.actor,
             "name": names[ev.actor],
-            "task_id": ev.payload["task_id"],
-            "product": ev.payload["product"],
-            "tier": ev.payload["tier"],
-            "first_in_world": ev.payload["first_in_world"],
+            "task_id": claim["task_id"],
+            "tier": claim["tier"],
+            "first_in_world": claim["first"],
         }
         for ev in events
-        if ev.kind is EventKind.TASK_ATTEMPT and ev.payload["verified"]
+        if ev.kind is EventKind.TASK_ATTEMPT
+        for claim in ev.payload["claims"]
     ]
     assert report["discoveries"] == expected
     assert len(expected) == summary.discoveries

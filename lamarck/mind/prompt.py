@@ -37,7 +37,7 @@ __all__ = [
     "render_user",
 ]
 
-TEMPLATE_VERSION = "p2.0"  # p2.0: satchel world rule (p1.x lineage: see git log)
+TEMPLATE_VERSION = "p2.1"  # p2.1: auto-claim, no citation (p2.0 satchel; p1.x: see git log)
 
 _ACTION_CLOSING = "Choose your action now. Reply with exactly one JSON object."
 _REFLECTION_CLOSING = (
@@ -75,18 +75,15 @@ def render_system(persona: PersonaCard) -> str:
         "one of: experiment, converse, teach, study, trade, note, travel, meditate,\n"
         "challenge, attempt_breakthrough, rest.\n"
         "Arguments by action (no other keys are accepted; numbers are plain integers):\n"
-        '  experiment {"task_id": "<task id>", "steps": [["<a>", "<b>"], ...]}\n'
+        '  experiment {"steps": [["<a>", "<b>"], ...]}\n'
         "    Each step is a PAIR OF EXACT INGREDIENT NAMES to combine in the crucible —\n"
         "    never instructions or descriptions. Usable names: the five bases (wood,\n"
         "    fire, earth, metal, water), everything in YOUR SATCHEL, and any product\n"
         "    an earlier step of this same attempt yielded (names may contain hyphens;\n"
         "    copy them exactly). Any other name is not at hand and the attempt stops.\n"
-        "    CITE THE COMMISSION WHOSE PRODUCT YOU INTEND TO MAKE: you are paid only\n"
-        "    when the cited commission's own compound appears among your products.\n"
-        "    When an outcome says 'X fulfills wx-tN-i', claim it: attempt commission\n"
-        "    wx-tN-i with the exact steps that made X.\n"
-        '    Example: {"action": "experiment", "task_id": "<commission you claim>",\n'
-        '              "steps": [["wood", "fire"]]}\n'
+        "    The board pays you AUTOMATICALLY the first time you produce a\n"
+        "    commissioned compound — just experiment; no paperwork.\n"
+        '    Example: {"action": "experiment", "steps": [["wood", "fire"]]}\n'
         '  converse {"target": "<name>", "text": "<what you say aloud>"}\n'
         '  travel {"to": "<location>"}\n'
         '  trade {"target": "<name>", "stones": <integer greater than 0>}\n'
@@ -159,7 +156,7 @@ def _tasks_block(view: PerceptionView) -> str:
         "TASK BOARD",
         "Base ingredients always at hand: wood, fire, earth, metal, water.",
         "Products you make join your satchel and stay usable as ingredients forever.",
-        "The board honors each commission once per cultivator; repeat verifications pay nothing.",
+        "Each commission pays automatically on your first production of its compound.",
     ]
     if view.tasks:
         for task in view.tasks:

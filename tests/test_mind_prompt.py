@@ -89,18 +89,15 @@ Respond with exactly one JSON object and nothing else. Its "action" key must be
 one of: experiment, converse, teach, study, trade, note, travel, meditate,
 challenge, attempt_breakthrough, rest.
 Arguments by action (no other keys are accepted; numbers are plain integers):
-  experiment {"task_id": "<task id>", "steps": [["<a>", "<b>"], ...]}
+  experiment {"steps": [["<a>", "<b>"], ...]}
     Each step is a PAIR OF EXACT INGREDIENT NAMES to combine in the crucible —
     never instructions or descriptions. Usable names: the five bases (wood,
     fire, earth, metal, water), everything in YOUR SATCHEL, and any product
     an earlier step of this same attempt yielded (names may contain hyphens;
     copy them exactly). Any other name is not at hand and the attempt stops.
-    CITE THE COMMISSION WHOSE PRODUCT YOU INTEND TO MAKE: you are paid only
-    when the cited commission's own compound appears among your products.
-    When an outcome says 'X fulfills wx-tN-i', claim it: attempt commission
-    wx-tN-i with the exact steps that made X.
-    Example: {"action": "experiment", "task_id": "<commission you claim>",
-              "steps": [["wood", "fire"]]}
+    The board pays you AUTOMATICALLY the first time you produce a
+    commissioned compound — just experiment; no paperwork.
+    Example: {"action": "experiment", "steps": [["wood", "fire"]]}
   converse {"target": "<name>", "text": "<what you say aloud>"}
   travel {"to": "<location>"}
   trade {"target": "<name>", "stones": <integer greater than 0>}
@@ -142,7 +139,7 @@ YOUR SATCHEL (everything you have made; usable as ingredients)
 TASK BOARD
 Base ingredients always at hand: wood, fire, earth, metal, water.
 Products you make join your satchel and stay usable as ingredients forever.
-The board honors each commission once per cultivator; repeat verifications pay nothing.
+Each commission pays automatically on your first production of its compound.
 - w1-01: produce "cinnabar-ash" (tier 1, materials 1 stones, bounty 10 stones)
 - w2-03: produce "quenched-iron" (tier 2, materials 2 stones, bounty 25 stones)"""
 
@@ -162,14 +159,14 @@ GOLDEN_REFLECTION = (
 )
 
 # sha256 of the utf-8 canonical envelope over (GOLDEN_SYSTEM, GOLDEN_USER).
-GOLDEN_PROMPT_SHA = "47611a931a6bf825ee89e55f50f4ae5907019ee0056527aae0f7b521f31d9c55"
+GOLDEN_PROMPT_SHA = "18c05a7c325360d032d6e0a758d680e56fa1cbc3a0df39a490cf8f707259d950"
 
 
 # ------------------------------------------------------------------- goldens
 
 
 def test_template_version_pinned() -> None:
-    assert TEMPLATE_VERSION == "p2.0"
+    assert TEMPLATE_VERSION == "p2.1"
 
 
 def test_golden_system() -> None:
@@ -301,7 +298,7 @@ def test_empty_sections_render_placeholders() -> None:
         "TASK BOARD\n"
         "Base ingredients always at hand: wood, fire, earth, metal, water.\n"
         "Products you make join your satchel and stay usable as ingredients forever.\n"
-        "The board honors each commission once per cultivator; repeat verifications pay nothing.\n"
+        "Each commission pays automatically on your first production of its compound.\n"
         "(no tasks posted)"
     ) in text
 

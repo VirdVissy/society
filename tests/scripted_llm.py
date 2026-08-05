@@ -200,15 +200,14 @@ def make(seed: int = 0) -> Callable[[str, GenParams], str]:
                 continue
             mind.claimed.add(task.task_id)
             mind.pending = mind.derivations[product]
-            return _action("experiment", task_id=task.task_id, steps=mind.derivations[product])
+            return _action("experiment", steps=mind.derivations[product])
         tier1 = [t for t in view.tasks if t.tier == 1]
         if mind.probe_idx < len(_BASE_PAIRS) and tier1 and view.stones >= tier1[0].materials:
             pair = _BASE_PAIRS[(mind.offset + mind.probe_idx) % len(_BASE_PAIRS)]
             mind.probe_idx += 1
-            anchor = next((t for t in tier1 if t.task_id not in mind.claimed), tier1[0])
             steps = [[pair[0], pair[1]]]
             mind.pending = steps
-            return _action("experiment", task_id=anchor.task_id, steps=steps)
+            return _action("experiment", steps=steps)
         if mind.derivations:
             products = sorted(mind.derivations)
             product = products[mind.build_idx % len(products)]
@@ -218,9 +217,8 @@ def make(seed: int = 0) -> Callable[[str, GenParams], str]:
             anchors = [t for t in view.tasks if t.tier == 2] or view.tasks
             if not anchors or view.stones < anchors[0].materials or len(steps) > 12:
                 return _action("meditate")
-            anchor = next((t for t in anchors if t.task_id not in mind.claimed), anchors[0])
             mind.pending = steps
-            return _action("experiment", task_id=anchor.task_id, steps=steps)
+            return _action("experiment", steps=steps)
         return _action("meditate")
 
     def social(mind: _Mind, view: _View, name: str) -> str:

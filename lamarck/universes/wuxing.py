@@ -49,6 +49,7 @@ from dataclasses import dataclass
 from lamarck.asserts import LMK_ASSERT
 from lamarck.contracts import (
     AuditReport,
+    CraftResult,
     Outcome,
     Submission,
     TaskStub,
@@ -347,19 +348,48 @@ class WuxingUniverse:
                 step_products=[],
                 message="no such commission",
             )
-        steps = submission.steps
+        rejection = self._reject_malformed(submission.steps)
+        if rejection is not None:
+            return self._rejected(compound, rejection)
+        step_products, message = self._run_steps(submission.steps, available)
+        verified = compound.name in step_products
+        if verified:
+            message += f"; the essence of {compound.name} condenses"
+        return Outcome(
+            verified=verified,
+            product=step_products[-1] if step_products else "",
+            tier=compound.tier,
+            step_products=step_products,
+            message=message,
+        )
+
+    def craft(self, submission: Submission, available: frozenset[str]) -> CraftResult:
+        """Execute steps with no commission in sight (auto-claim rule: the
+        engine maps products to commissions; the universe only cooks).
+        Malformed input yields an empty CraftResult with a precise message —
+        never an exception."""
+        rejection = self._reject_malformed(submission.steps)
+        if rejection is not None:
+            return CraftResult(step_products=[], message=rejection)
+        step_products, message = self._run_steps(submission.steps, available)
+        return CraftResult(step_products=step_products, message=message)
+
+    def _reject_malformed(self, steps: list[list[str]]) -> str | None:
         if len(steps) == 0:
-            return self._rejected(compound, "the procedure names no steps")
+            return "the procedure names no steps"
         if len(steps) > MAX_STEPS:
-            return self._rejected(
-                compound,
-                f"the crucible admits at most {MAX_STEPS} combinations; {len(steps)} were offered",
+            return (
+                f"the crucible admits at most {MAX_STEPS} combinations; {len(steps)} were offered"
             )
         for position, step in enumerate(steps, start=1):
             if len(step) != 2:
-                return self._rejected(
-                    compound, f"step {position} must combine exactly two ingredients"
-                )
+                return f"step {position} must combine exactly two ingredients"
+        return None
+
+    def _run_steps(
+        self, steps: list[list[str]], available: frozenset[str]
+    ) -> tuple[list[str], str]:
+        """The shared execution loop: (step_products, in-fiction message)."""
         usable: set[str] = set(BASES) | set(available)
         step_products: list[str] = []
         halted_on: str | None = None
@@ -374,21 +404,10 @@ class WuxingUniverse:
             product = self._combine(first, second)
             step_products.append(product)
             usable.add(product)
-        verified = compound.name in step_products
-        final = step_products[-1] if step_products else ""
         if halted_on is not None:
-            message = f"the {halted_on} is not at hand"
-        else:
-            message = f"the crucible yields {final}"
-        if verified:
-            message += f"; the essence of {compound.name} condenses"
-        return Outcome(
-            verified=verified,
-            product=final,
-            tier=compound.tier,
-            step_products=step_products,
-            message=message,
-        )
+            return step_products, f"the {halted_on} is not at hand"
+        final = step_products[-1] if step_products else ""
+        return step_products, f"the crucible yields {final}"
 
     def oracle_audit(self) -> AuditReport:
         """Structure-only audit: closure reachability, minimal derivation
