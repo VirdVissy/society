@@ -37,7 +37,7 @@ __all__ = [
     "render_user",
 ]
 
-TEMPLATE_VERSION = "p1.4"  # p1.4: cite-the-right-commission rules (p1.3..p1.1: see git log)
+TEMPLATE_VERSION = "p1.5"  # p1.5: crucible-empties chaining lesson (p1.4..p1.1: see git log)
 
 _ACTION_CLOSING = "Choose your action now. Reply with exactly one JSON object."
 _REFLECTION_CLOSING = (
@@ -81,12 +81,15 @@ def render_system(persona: PersonaCard) -> str:
         "    fire, earth, metal, water) and the exact full name of any product an\n"
         "    EARLIER step of this same attempt yielded (names may contain hyphens;\n"
         "    copy them exactly). Any other name is not at hand and the attempt stops.\n"
+        "    THE CRUCIBLE EMPTIES BETWEEN ATTEMPTS: no product is ever stored. To use\n"
+        "    a discovered product as an ingredient, RE-MAKE it as an earlier step of\n"
+        "    the SAME attempt, then combine it. A higher-tier attempt is a chain:\n"
+        '    {"action": "experiment", "task_id": "<commission you are claiming>",\n'
+        '     "steps": [["earth", "water"], ["<the product step 1 just made>", "wood"]]}\n'
         "    CITE THE COMMISSION WHOSE PRODUCT YOU INTEND TO MAKE: you are paid only\n"
         "    when the cited commission's own compound appears among your products.\n"
         "    When an outcome says 'X fulfills wx-tN-i', claim it: attempt commission\n"
         "    wx-tN-i with the exact steps that made X.\n"
-        "    Example (replace the task_id with the commission you are claiming):\n"
-        '    {"action": "experiment", "task_id": "wx-t1-0", "steps": [["wood", "fire"]]}\n'
         '  converse {"target": "<name>", "text": "<what you say aloud>"}\n'
         '  travel {"to": "<location>"}\n'
         '  trade {"target": "<name>", "stones": <integer greater than 0>}\n'

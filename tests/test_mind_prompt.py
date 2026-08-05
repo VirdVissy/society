@@ -94,12 +94,15 @@ Arguments by action (no other keys are accepted; numbers are plain integers):
     fire, earth, metal, water) and the exact full name of any product an
     EARLIER step of this same attempt yielded (names may contain hyphens;
     copy them exactly). Any other name is not at hand and the attempt stops.
+    THE CRUCIBLE EMPTIES BETWEEN ATTEMPTS: no product is ever stored. To use
+    a discovered product as an ingredient, RE-MAKE it as an earlier step of
+    the SAME attempt, then combine it. A higher-tier attempt is a chain:
+    {"action": "experiment", "task_id": "<commission you are claiming>",
+     "steps": [["earth", "water"], ["<the product step 1 just made>", "wood"]]}
     CITE THE COMMISSION WHOSE PRODUCT YOU INTEND TO MAKE: you are paid only
     when the cited commission's own compound appears among your products.
     When an outcome says 'X fulfills wx-tN-i', claim it: attempt commission
     wx-tN-i with the exact steps that made X.
-    Example (replace the task_id with the commission you are claiming):
-    {"action": "experiment", "task_id": "wx-t1-0", "steps": [["wood", "fire"]]}
   converse {"target": "<name>", "text": "<what you say aloud>"}
   travel {"to": "<location>"}
   trade {"target": "<name>", "stones": <integer greater than 0>}
@@ -157,14 +160,14 @@ GOLDEN_REFLECTION = (
 )
 
 # sha256 of the utf-8 canonical envelope over (GOLDEN_SYSTEM, GOLDEN_USER).
-GOLDEN_PROMPT_SHA = "b65c62c093e2fd2aa7815954c3d3963fccadc40ca39cfa27574415c5716a0275"
+GOLDEN_PROMPT_SHA = "62f4071ab866c8c3604cdd2e681005c982bf88e12ce483179a66637e639a0ca9"
 
 
 # ------------------------------------------------------------------- goldens
 
 
 def test_template_version_pinned() -> None:
-    assert TEMPLATE_VERSION == "p1.4"
+    assert TEMPLATE_VERSION == "p1.5"
 
 
 def test_golden_system() -> None:
