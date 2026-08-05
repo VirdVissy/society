@@ -96,6 +96,26 @@ stays the only judge of chemistry. Halted at day ~20 rather than pay for
 an unreachable gate; the canary protocol gained a chaining gate (≥1
 verified tier-2 by day 4) before any full launch.
 
+### Pivot 5 — the satchel (world redesign from two-model evidence)
+
+p1.5's chaining lesson failed its canary: 2/177 multi-step attempts on
+Haiku — and the control experiment settled the attribution question. The
+same world and template on **Sonnet 5** produced 3/207 multi-step and zero
+tier-2, at twice the price. Two model tiers, one behavior: per-attempt
+re-derivation fights an intuition every model shares ("I made it, I have
+it"). Both p1.5 canaries also regressed tier-1 breadth versus p1.4 —
+teaching text itself taxes compliance.
+
+So the world changed instead of the prompt: the **satchel**. Products join
+a permanent personal tech tree; availability = bases ∪ satchel ∪ this
+attempt's earlier products. `Universe.attempt` gains an engine-supplied
+`available` set (universe stays stateless; default preserves pre-satchel
+behavior exactly), the world fold and the shallow-replay verifier share
+the refold rule, and template p2.0 DELETES the chaining lesson — the
+confusing paragraph existed only to explain the unintuitive world. Tier-2
+is now one new step atop an earned satchel; recipes remain undiscovered.
+The canary gate (≥1 verified tier-2 by day 4) now tests the redesign.
+
 ## Measured numbers
 
 - **Local baseline** (mlx, Qwen3-4B-4bit, M3 Pro, template p1.0): 2-day

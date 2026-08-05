@@ -427,12 +427,20 @@ class AuditReport(BaseModel):
 class UniverseP(Protocol):
     """A problem domain with an instant, incorruptible, DETERMINISTIC
     verifier. Hidden rules must never appear in any prompt. ``attempt`` is a
-    pure function of (task_id, submission) — Phase 1 universes take no rng
-    (deviation from PLAN §3.4, determinism-first; recorded in SPEC)."""
+    pure function of (task_id, submission, available) — Phase 1 universes
+    take no rng (deviation from PLAN §3.4, determinism-first; recorded in
+    SPEC). ``available`` is the attempter's SATCHEL (deviation ratified
+    2026-08-05 after the inventory-fallacy finding): compounds the caller
+    certifies the agent has produced before this attempt. The engine owns
+    satchel truth (folded from the event log); the universe only honors it
+    as extra usable ingredient names alongside bases and earlier-step
+    products of the same attempt."""
 
     def manifest(self) -> UniverseManifest: ...
     def tasks(self, tier: int) -> list[TaskStub]: ...
-    def attempt(self, task_id: str, submission: Submission) -> Outcome: ...
+    def attempt(
+        self, task_id: str, submission: Submission, available: frozenset[str]
+    ) -> Outcome: ...
     def oracle_audit(self) -> AuditReport: ...
 
 
@@ -481,6 +489,11 @@ class PerceptionView(BaseModel):
     notes: list[str]  # own last 5 NOTE texts, oldest first
     reflection: str  # own latest REFLECTION text ("" on day 0)
     outcomes: list[str]  # own last 3 TASK_ATTEMPT messages, oldest first
+    satchel: list[str] = Field(default_factory=list)
+    """Compounds this agent has ever produced (non-slag step products),
+    first-acquired order, deduped — the personal tech tree. Usable as
+    experiment ingredients alongside bases (satchel world rule, 2026-08-05).
+    Default [] keeps Phase-0-era fixtures valid."""
     tasks: list[TaskStub]  # the visible task board
     materials: list[int]  # stones cost by tier (from config)
     bounties: list[int]  # payout by tier (from config)
@@ -522,6 +535,7 @@ class LiveWorldConfig(WorldConfig):
     model: ModelSection
     universe: UniverseSection
     live: LiveSection
+
 
 __all__ = [
     "SCHEMA_VERSION",

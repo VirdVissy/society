@@ -245,6 +245,23 @@ the build waves:
   share one helper, so they cannot diverge. Template p1.3 adds a matching
   reflection nudge ("name any commission you now know how to fulfill but
   have not yet claimed").
+- **The satchel world rule** (ratified 2026-08-05 after two-model canary
+  evidence): every non-slag step product an agent produces joins their
+  satchel permanently (first-acquired order, deduped, never consumed — a
+  personal tech tree, not item storage). Experiment availability = bases ∪
+  satchel ∪ earlier products of the same attempt. `Universe.attempt` gains
+  `available: frozenset[str]` (engine-supplied; the universe stays
+  stateless and rng-free; default `frozenset()` preserves every
+  pre-satchel behavior byte-for-byte). The engine folds satchel truth from
+  TASK_ATTEMPT `step_products`; the shallow-replay verifier refolds it
+  with the same rule and threads it through re-verification. Perception
+  gains a YOUR SATCHEL block; template p2.0 *removes* the crucible-empties
+  chaining lesson entirely — the rule existed only to explain the
+  unintuitive world it replaced. Evidence: Haiku and Sonnet both produced
+  ≤3 multi-step attempts out of ~200 under per-attempt re-derivation
+  (p1.5); every model tested holds the made-it-so-I-have-it intuition, so
+  the world now matches it, and tier-2 collapses to tier-1 cognitive load
+  while recipes stay undiscovered.
 - **Resume** (ratified from the day-12 529 death): `lamarck resume RUN_DIR`
   continues an interrupted live run from its last completed day. Day-batch
   transactions guarantee a clean boundary; resume verifies the chain,

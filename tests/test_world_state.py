@@ -415,7 +415,14 @@ def test_reflection_without_text_asserts() -> None:
 def test_outcomes_keep_last_three_oldest_first() -> None:
     events = [_spawn(0, "a1")]
     for i in range(4):
-        events.append(_ev(1 + i, EventKind.TASK_ATTEMPT, actor="a1", payload={"message": f"m{i}"}))
+        events.append(
+            _ev(
+                1 + i,
+                EventKind.TASK_ATTEMPT,
+                actor="a1",
+                payload={"message": f"m{i}", "step_products": []},
+            )
+        )
     ws = _fold(*events)
     assert ws.outcomes("a1") == ["m1", "m2", "m3"]
 
@@ -464,7 +471,7 @@ def test_queries_return_fresh_lists_not_views() -> None:
         _spawn(1, "a2", "Brook"),
         _converse(2, "a1", "hi"),
         _note(3, "a2", "n"),
-        _ev(4, EventKind.TASK_ATTEMPT, actor="a2", payload={"message": "m"}),
+        _ev(4, EventKind.TASK_ATTEMPT, actor="a2", payload={"message": "m", "step_products": []}),
     )
     ws.heard("a2", 0).clear()
     ws.notes("a2").clear()
@@ -489,3 +496,39 @@ def test_queries_on_unknown_agent_assert() -> None:
     ):
         with pytest.raises(LamarckAssertionError, match="unregistered"):
             query()
+
+
+class TestSatchel:
+    def test_satchel_accumulates_non_slag_first_acquired_deduped(self) -> None:
+        fold = _fold(
+            _spawn(0, "a1"),
+            _ev(
+                1,
+                EventKind.TASK_ATTEMPT,
+                actor="a1",
+                payload={"message": "m", "step_products": ["iron-ash", "slag", "iron-ash"]},
+            ),
+            _ev(
+                2,
+                EventKind.TASK_ATTEMPT,
+                actor="a1",
+                payload={"message": "m", "step_products": ["pale-dew", "iron-ash"]},
+            ),
+        )
+        assert fold.satchel("a1") == ["iron-ash", "pale-dew"]
+
+    def test_satchel_is_per_agent_and_fresh_copies(self) -> None:
+        fold = _fold(
+            _spawn(0, "a1"),
+            _spawn(1, "a2"),
+            _ev(
+                2,
+                EventKind.TASK_ATTEMPT,
+                actor="a1",
+                payload={"message": "m", "step_products": ["iron-ash"]},
+            ),
+        )
+        assert fold.satchel("a2") == []
+        first = fold.satchel("a1")
+        first.append("tampered")
+        assert fold.satchel("a1") == ["iron-ash"]

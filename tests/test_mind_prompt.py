@@ -60,6 +60,7 @@ VIEW = PerceptionView(
         "The mixture seized into dull slag.",
         "A faint shimmer: the ash took the water.",
     ],
+    satchel=["cinnabar-ash", "quenched-iron"],
     tasks=[
         TaskStub(task_id="w1-01", tier=1, title='produce "cinnabar-ash"'),
         TaskStub(task_id="w2-03", tier=2, title='produce "quenched-iron"'),
@@ -91,18 +92,15 @@ Arguments by action (no other keys are accepted; numbers are plain integers):
   experiment {"task_id": "<task id>", "steps": [["<a>", "<b>"], ...]}
     Each step is a PAIR OF EXACT INGREDIENT NAMES to combine in the crucible —
     never instructions or descriptions. Usable names: the five bases (wood,
-    fire, earth, metal, water) and the exact full name of any product an
-    EARLIER step of this same attempt yielded (names may contain hyphens;
+    fire, earth, metal, water), everything in YOUR SATCHEL, and any product
+    an earlier step of this same attempt yielded (names may contain hyphens;
     copy them exactly). Any other name is not at hand and the attempt stops.
-    THE CRUCIBLE EMPTIES BETWEEN ATTEMPTS: no product is ever stored. To use
-    a discovered product as an ingredient, RE-MAKE it as an earlier step of
-    the SAME attempt, then combine it. A higher-tier attempt is a chain:
-    {"action": "experiment", "task_id": "<commission you are claiming>",
-     "steps": [["earth", "water"], ["<the product step 1 just made>", "wood"]]}
     CITE THE COMMISSION WHOSE PRODUCT YOU INTEND TO MAKE: you are paid only
     when the cited commission's own compound appears among your products.
     When an outcome says 'X fulfills wx-tN-i', claim it: attempt commission
     wx-tN-i with the exact steps that made X.
+    Example: {"action": "experiment", "task_id": "<commission you claim>",
+              "steps": [["wood", "fire"]]}
   converse {"target": "<name>", "text": "<what you say aloud>"}
   travel {"to": "<location>"}
   trade {"target": "<name>", "stones": <integer greater than 0>}
@@ -137,9 +135,13 @@ RECENT EXPERIMENT OUTCOMES (oldest first)
 - The mixture seized into dull slag.
 - A faint shimmer: the ash took the water.
 
+YOUR SATCHEL (everything you have made; usable as ingredients)
+- cinnabar-ash
+- quenched-iron
+
 TASK BOARD
 Base ingredients always at hand: wood, fire, earth, metal, water.
-Combining unlocks products; a product's exact name becomes usable in later steps.
+Products you make join your satchel and stay usable as ingredients forever.
 The board honors each commission once per cultivator; repeat verifications pay nothing.
 - w1-01: produce "cinnabar-ash" (tier 1, materials 1 stones, bounty 10 stones)
 - w2-03: produce "quenched-iron" (tier 2, materials 2 stones, bounty 25 stones)"""
@@ -160,14 +162,14 @@ GOLDEN_REFLECTION = (
 )
 
 # sha256 of the utf-8 canonical envelope over (GOLDEN_SYSTEM, GOLDEN_USER).
-GOLDEN_PROMPT_SHA = "62f4071ab866c8c3604cdd2e681005c982bf88e12ce483179a66637e639a0ca9"
+GOLDEN_PROMPT_SHA = "47611a931a6bf825ee89e55f50f4ae5907019ee0056527aae0f7b521f31d9c55"
 
 
 # ------------------------------------------------------------------- goldens
 
 
 def test_template_version_pinned() -> None:
-    assert TEMPLATE_VERSION == "p1.5"
+    assert TEMPLATE_VERSION == "p2.0"
 
 
 def test_golden_system() -> None:
@@ -285,6 +287,7 @@ def test_empty_sections_render_placeholders() -> None:
             "reflection": "",
             "outcomes": [],
             "tasks": [],
+            "satchel": [],
         }
     )
     text = render_user(empty)
@@ -293,10 +296,11 @@ def test_empty_sections_render_placeholders() -> None:
     assert "YOUR NOTES (oldest first)\n(none)" in text
     assert "YOUR LAST REFLECTION\n(none)" in text
     assert "RECENT EXPERIMENT OUTCOMES (oldest first)\n(none)" in text
+    assert "YOUR SATCHEL (everything you have made; usable as ingredients)\n(empty)" in text
     assert (
         "TASK BOARD\n"
         "Base ingredients always at hand: wood, fire, earth, metal, water.\n"
-        "Combining unlocks products; a product's exact name becomes usable in later steps.\n"
+        "Products you make join your satchel and stay usable as ingredients forever.\n"
         "The board honors each commission once per cultivator; repeat verifications pay nothing.\n"
         "(no tasks posted)"
     ) in text

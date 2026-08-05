@@ -595,6 +595,7 @@ class _LiveEngine:
             notes=self.world.notes(actor),
             reflection=self.world.reflection(actor),
             outcomes=self.world.outcomes(actor),
+            satchel=self.world.satchel(actor),
             tasks=list(self.board),
             materials=list(self.cfg.economy.materials),
             bounties=list(self.cfg.economy.bounties),
@@ -818,7 +819,11 @@ class _LiveEngine:
         task_id = args["task_id"]
         assert isinstance(task_id, str)  # parser-guaranteed
         submission = Submission.model_validate({"steps": args["steps"]})
-        outcome: Outcome = self.universe.attempt(task_id, submission)
+        # Satchel BEFORE this attempt: the TASK_ATTEMPT event that updates it
+        # commits after the universe's verdict, so read order is the rule.
+        outcome: Outcome = self.universe.attempt(
+            task_id, submission, frozenset(self.world.satchel(actor))
+        )
         LMK_ASSERT(
             outcome.tier == verdict.tier,
             "universe outcome tier disagrees with the task board",
@@ -1380,6 +1385,9 @@ def _reverify_attempts(
     )
     seen_verified: set[str] = set()  # membership only; never iterated
     paid_pairs: set[tuple[str, str]] = set()  # (actor, task_id); once-per-cultivator rule
+    # Satchel refold (mirrors WorldStateFold's rule with the same read order:
+    # the satchel an attempt sees excludes that attempt's own products).
+    satchels: dict[str, set[str]] = {}
     checked = 0
     prev: EventRecord | None = None
     for ev in events:
@@ -1399,7 +1407,11 @@ def _reverify_attempts(
                 )
                 prev = ev
                 continue
-            outcome = universe.attempt(task_id, submission)
+            satchel = satchels.setdefault(ev.actor, set())
+            outcome = universe.attempt(task_id, submission, frozenset(satchel))
+            for product in outcome.step_products:
+                if product != "slag":
+                    satchel.add(product)
             expected: dict[str, Any] = {
                 "verified": outcome.verified,
                 "product": outcome.product,

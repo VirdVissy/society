@@ -324,13 +324,19 @@ class WuxingUniverse:
             if c.tier == tier
         ]
 
-    def attempt(self, task_id: str, submission: Submission) -> Outcome:
+    def attempt(
+        self, task_id: str, submission: Submission, available: frozenset[str] = frozenset()
+    ) -> Outcome:
         """Pure, deterministic verification of one procedure.
 
-        Malformed input yields a non-verified Outcome with a precise
-        in-fiction message — never an exception. Messages name only what the
-        submitter already knows: their own submitted ingredients, their own
-        step products, and the task's public target.
+        ``available`` is the attempter's satchel (contracts: compounds the
+        CALLER certifies were produced before this attempt — the engine folds
+        it from the event log; the universe never stores state). Usable
+        ingredient names are bases ∪ available ∪ earlier step products of
+        this same attempt. Malformed input yields a non-verified Outcome
+        with a precise in-fiction message — never an exception. Messages
+        name only what the submitter already knows: their own submitted
+        ingredients, their own step products, and the task's public target.
         """
         compound = self._by_task_id.get(task_id)
         if compound is None:
@@ -354,20 +360,20 @@ class WuxingUniverse:
                 return self._rejected(
                     compound, f"step {position} must combine exactly two ingredients"
                 )
-        available: set[str] = set(BASES)
+        usable: set[str] = set(BASES) | set(available)
         step_products: list[str] = []
         halted_on: str | None = None
         for step in steps:
             first, second = step[0], step[1]
-            if first not in available:
+            if first not in usable:
                 halted_on = first
                 break
-            if second not in available:
+            if second not in usable:
                 halted_on = second
                 break
             product = self._combine(first, second)
             step_products.append(product)
-            available.add(product)
+            usable.add(product)
         verified = compound.name in step_products
         final = step_products[-1] if step_products else ""
         if halted_on is not None:

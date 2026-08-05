@@ -103,6 +103,8 @@ class WorldStateFold:
         self._notes: dict[str, list[str]] = {}
         self._reflection: dict[str, str] = {}
         self._outcomes: dict[str, list[str]] = {}
+        self._satchel: dict[str, list[str]] = {}
+        self._satchel_seen: dict[str, set[str]] = {}  # membership only; never iterated
 
     # ----------------------------------------------------------------- fold
 
@@ -121,6 +123,21 @@ class WorldStateFold:
         elif ev.kind is EventKind.TASK_ATTEMPT:
             self._assert_registered_alive(ev.actor, ev)
             self._outcomes[ev.actor].append(self._payload_str(ev, "message"))
+            # Satchel rule (2026-08-05): every non-slag step product joins the
+            # maker's satchel — first-acquired order, deduped, never removed.
+            products = ev.payload.get("step_products")
+            LMK_ASSERT(
+                isinstance(products, list),
+                "TASK_ATTEMPT payload needs a step_products list",
+                seq=ev.seq,
+            )
+            assert isinstance(products, list)  # narrow for mypy; guaranteed above
+            satchel = self._satchel[ev.actor]
+            seen = self._satchel_seen[ev.actor]
+            for product in products:
+                if isinstance(product, str) and product != "slag" and product not in seen:
+                    seen.add(product)
+                    satchel.append(product)
         # Every other kind (run/day/phase markers, LLM_CALL, LEDGER_ADJUST)
         # has no world-state effect.
 
@@ -171,6 +188,12 @@ class WorldStateFold:
         first."""
         self._assert_registered(agent)
         return list(self._outcomes[agent][-OUTCOMES_MAX:])
+
+    def satchel(self, agent: str) -> list[str]:
+        """Every non-slag compound ``agent`` has ever produced —
+        first-acquired order, deduped (the personal tech tree)."""
+        self._assert_registered(agent)
+        return list(self._satchel[agent])
 
     def can_trade(self, actor: str, target: str) -> tuple[bool, str]:
         """Advisory pre-emission check: may ``actor`` trade with ``target``?
@@ -226,6 +249,8 @@ class WorldStateFold:
         self._notes[agent_id] = []
         self._reflection[agent_id] = ""
         self._outcomes[agent_id] = []
+        self._satchel[agent_id] = []
+        self._satchel_seen[agent_id] = set()
 
     def _apply_action(self, ev: EventRecord) -> None:
         if ev.payload.get("degraded"):

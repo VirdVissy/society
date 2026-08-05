@@ -487,3 +487,50 @@ class TestConstruction:
             UNI.tasks(0)
         with pytest.raises(LamarckAssertionError):
             UNI.tasks(6)
+
+
+class TestSatchel:
+    """The satchel world rule: ``available`` compounds are usable step-1
+    ingredients, exactly like bases."""
+
+    def test_satchel_ingredient_usable_in_first_step(self) -> None:
+        stub = UNI.tasks(1)[0]
+        product = UNI.attempt(stub.task_id, Submission(steps=[["wood", "fire"]])).step_products[0]
+        out = UNI.attempt(
+            stub.task_id, Submission(steps=[[product, "earth"]]), frozenset([product])
+        )
+        assert out.step_products, "satchel ingredient must be at hand"
+
+    def test_without_satchel_same_attempt_halts(self) -> None:
+        stub = UNI.tasks(1)[0]
+        product = UNI.attempt(stub.task_id, Submission(steps=[["wood", "fire"]])).step_products[0]
+        out = UNI.attempt(stub.task_id, Submission(steps=[[product, "earth"]]))
+        assert out.step_products == [] and "not at hand" in out.message
+
+    def test_satchel_enables_tier2_single_step(self) -> None:
+        """With the tier-2 recipe's lower ingredient in the satchel, the
+        tier-2 compound is one new step — the redesign's whole point."""
+        rules = UNI._debug_rules()
+        by_name = {}
+        for tier in (1, 2):
+            for stub in UNI.tasks(tier):
+                by_name[stub.title.split('"')[1]] = (stub, tier)
+        for pair, product in rules.items():
+            if product in by_name and by_name[product][1] == 2:
+                a, b = pair.split("+")
+                stub2 = by_name[product][0]
+                out = UNI.attempt(
+                    stub2.task_id,
+                    Submission(steps=[[a, b]]),
+                    frozenset([a, b]),
+                )
+                assert out.verified, (pair, product, out.message)
+                return
+        raise AssertionError("no tier-2 recipe found")
+
+    def test_satchel_never_leaks_unearned_names(self) -> None:
+        """An empty satchel plus an unknown name still halts — the default
+        argument preserves every pre-satchel behavior byte-for-byte."""
+        stub = UNI.tasks(1)[0]
+        out = UNI.attempt(stub.task_id, Submission(steps=[["ghost", "wood"]]))
+        assert out.step_products == [] and "ghost" in out.message
