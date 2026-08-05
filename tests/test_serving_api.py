@@ -42,6 +42,16 @@ def _response(blocks: list[object], usage_in: int = 100, usage_out: int = 20) ->
     )
 
 
+class FakeAPIStatusError(Exception):
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"status {status_code}")
+        self.status_code = status_code
+
+
+class FakeAPIConnectionError(Exception):
+    pass
+
+
 @pytest.fixture
 def fake_anthropic(monkeypatch: pytest.MonkeyPatch) -> _FakeMessages:
     messages = _FakeMessages(_response([SimpleNamespace(type="text", text="hello")]))
@@ -53,6 +63,8 @@ def fake_anthropic(monkeypatch: pytest.MonkeyPatch) -> _FakeMessages:
             self.messages = messages
 
     module.Anthropic = Anthropic  # type: ignore[attr-defined]
+    module.APIStatusError = FakeAPIStatusError  # type: ignore[attr-defined]
+    module.APIConnectionError = FakeAPIConnectionError  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "anthropic", module)
     return messages
 
@@ -141,6 +153,56 @@ def test_make_backend_unknown_names_all_three() -> None:
     )
     with pytest.raises(ValueError, match="'mlx', 'anthropic' or 'scripted'"):
         make_backend(section)
+
+
+def _flaky_messages(
+    fake: _FakeMessages, failures: list[Exception], monkeypatch: pytest.MonkeyPatch
+) -> list[int]:
+    """Make the fake raise each queued exception before succeeding; capture sleeps."""
+    sleeps: list[int] = []
+    monkeypatch.setattr("lamarck.serving.backends.time.sleep", sleeps.append)
+    original = fake.create
+
+    def create(**kwargs: object) -> object:
+        if failures:
+            raise failures.pop(0)
+        return original(**kwargs)
+
+    fake.create = create  # type: ignore[method-assign]
+    return sleeps
+
+
+def test_patience_retries_overload_then_succeeds(
+    fake_anthropic: _FakeMessages, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sleeps = _flaky_messages(
+        fake_anthropic,
+        [FakeAPIStatusError(529), FakeAPIStatusError(429), FakeAPIConnectionError()],
+        monkeypatch,
+    )
+    result = AnthropicBackend("claude-haiku-4-5").generate(_envelope(), PARAMS)
+    assert result.text == "hello"
+    assert sleeps == [15, 30, 60]  # min(120, 15 * 2^k)
+
+
+def test_patience_gives_up_after_outer_attempts(
+    fake_anthropic: _FakeMessages, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    failures: list[Exception] = [FakeAPIStatusError(529) for _ in range(20)]
+    sleeps = _flaky_messages(fake_anthropic, failures, monkeypatch)
+    with pytest.raises(FakeAPIStatusError):
+        AnthropicBackend("claude-haiku-4-5").generate(_envelope(), PARAMS)
+    assert len(sleeps) == 7  # _OUTER_ATTEMPTS - 1 waits, then the raise
+    assert sleeps[-1] == 120  # capped backoff
+
+
+def test_permanent_errors_propagate_immediately(
+    fake_anthropic: _FakeMessages, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sleeps = _flaky_messages(fake_anthropic, [FakeAPIStatusError(400)], monkeypatch)
+    with pytest.raises(FakeAPIStatusError):
+        AnthropicBackend("claude-haiku-4-5").generate(_envelope(), PARAMS)
+    assert sleeps == []  # a billing/validation 400 must fail fast
 
 
 def test_live_config_accepts_anthropic_backend(tmp_path) -> None:

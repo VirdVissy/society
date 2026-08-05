@@ -245,6 +245,20 @@ the build waves:
   share one helper, so they cannot diverge. Template p1.3 adds a matching
   reflection nudge ("name any commission you now know how to fulfill but
   have not yet claimed").
+- **Resume** (ratified from the day-12 529 death): `lamarck resume RUN_DIR`
+  continues an interrupted live run from its last completed day. Day-batch
+  transactions guarantee a clean boundary; resume verifies the chain,
+  refuses finished/foreign/mixed runs (config sha, template version, and
+  persona names must match the current code — a resumed run never silently
+  mixes worlds), rebuilds all engine state by folding the log, and replays
+  both RNG streams' recorded consumption (one `iter_day` per completed day
+  with that day's alive list; one discarded draw per LLM_CALL) so deep
+  replay of the finished log re-executes as one seamless process.
+  Known cosmetic gap: pre-crash `reflections_skipped` restarts at 0 (skips
+  emit no event by design). The Anthropic backend additionally carries an
+  outer patience loop (8 attempts, capped exponential backoff, transient
+  classes only: connection/408/409/429/5xx) so overload windows shorter
+  than ~12 minutes never kill a run in the first place.
 - **Cloud backend** (ratified at the user's request): `model.backend =
   "anthropic"` serves generation from the Anthropic API. The "no network in
   the sim loop" rule is refined to its actual intent: *agents* may never

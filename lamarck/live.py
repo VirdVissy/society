@@ -1036,14 +1036,48 @@ def run_live(
         engine = _LiveEngine(cfg, store, texts, resolved_backend, personas, agent_ids)
         with store.batch():
             engine.spawn(run_id)
+        return _drive_to_completion(
+            engine,
+            cfg,
+            store,
+            out_dir,
+            run_id,
+            t0,
+            start_day=0,
+            difftest_interval=difftest_interval,
+            dashboard=dashboard,
+        )
 
-        days_elapsed = 0
-        last_day = 0
+
+def _drive_to_completion(
+    engine: _LiveEngine,
+    cfg: LiveWorldConfig,
+    store: EventStore,
+    out_dir: Path,
+    run_id: str,
+    t0: float,
+    *,
+    start_day: int,
+    difftest_interval: int,
+    dashboard: bool,
+) -> LiveRunSummary:
+    """Run days ``start_day .. cfg.world.days - 1``, then finalize.
+
+    Shared by ``run_live`` (start_day 0, fresh engine) and ``resume_live``
+    (start_day = first uncompleted day, engine rebuilt from the log). When
+    ``start_day`` leaves no days to run — or the log's last completed day
+    ended with nobody alive — the loop is skipped and finalization uses the
+    engine's rebuilt ``night_tick``/day state, exactly as a continuous run
+    would have finalized.
+    """
+    days_elapsed = start_day
+    last_day = start_day - 1
+    if start_day < cfg.world.days and engine.any_alive():
         if dashboard:
             from rich.live import Live
 
             with Live(refresh_per_second=4) as live_view:
-                for day in range(cfg.world.days):
+                for day in range(start_day, cfg.world.days):
                     engine.run_day(day, difftest_interval)
                     live_view.update(_render_dashboard(engine, day))
                     last_day = day
@@ -1051,35 +1085,35 @@ def run_live(
                     if not engine.any_alive():
                         break
         else:
-            for day in range(cfg.world.days):
+            for day in range(start_day, cfg.world.days):
                 engine.run_day(day, difftest_interval)
                 last_day = day
                 days_elapsed = day + 1
                 if not engine.any_alive():
                     break
 
-        LMK_ASSERT(days_elapsed >= 1, "run finished without completing a day")
-        LMK_ASSERT(engine.night_tick >= 0, "last day completed without a night slot")
-        final_balances = engine.ledgers.balances()
-        final_state_sha = _balances_sha(final_balances.model_dump(mode="json"))
-        engine.commit(
-            EventDraft(
-                day=last_day,
-                tick=engine.night_tick,
-                kind=EventKind.RUN_FINISHED,
-                actor=WORLD_ACTOR,
-                payload={"days_elapsed": days_elapsed, "final_state_sha": final_state_sha},
-            )
+    LMK_ASSERT(days_elapsed >= 1, "run finished without completing a day")
+    LMK_ASSERT(engine.night_tick >= 0, "last day completed without a night slot")
+    final_balances = engine.ledgers.balances()
+    final_state_sha = _balances_sha(final_balances.model_dump(mode="json"))
+    engine.commit(
+        EventDraft(
+            day=last_day,  # >= 0 whenever days_elapsed >= 1 (asserted above)
+            tick=engine.night_tick,
+            kind=EventKind.RUN_FINISHED,
+            actor=WORLD_ACTOR,
+            payload={"days_elapsed": days_elapsed, "final_state_sha": final_state_sha},
         )
-        engine.flush_texts()
-        head_seq, head_hash = store.verify_chain()
-        assert_difftest(engine.ledgers, store.scan(), cfg)
-        LMK_ASSERT(
-            head_seq + 1 == engine.emitted,
-            "verified head disagrees with the runner's emission count",
-            head_seq=head_seq,
-            emitted=engine.emitted,
-        )
+    )
+    engine.flush_texts()
+    head_seq, head_hash = store.verify_chain()
+    assert_difftest(engine.ledgers, store.scan(), cfg)
+    LMK_ASSERT(
+        head_seq + 1 == engine.emitted,
+        "verified head disagrees with the runner's emission count",
+        head_seq=head_seq,
+        emitted=engine.emitted,
+    )
 
     from lamarck.analysis.report import write_report
 
@@ -1114,6 +1148,202 @@ def run_live(
         wall_ms=wall_ms,
         out_dir=str(out_dir),
     )
+
+
+# ---------------------------------------------------------------- resume_live
+
+
+def resume_live(
+    run_dir: Path,
+    *,
+    backend: ModelBackendP | None = None,
+    difftest_interval: int = 10,
+    dashboard: bool = False,
+    personas_dir: Path | None = None,
+) -> LiveRunSummary:
+    """Continue an interrupted live run from its last completed day.
+
+    A crash mid-day rolls back that whole day (one batch per day), so an
+    interrupted log always ends at a clean boundary: the spawn preamble, or
+    some day's night marker. Resume rebuilds the ENTIRE engine state by
+    folding the log — ledgers, world fold, first-verified/bounties-paid
+    sets, counters — and reconstructs both RNG streams exactly (scheduler:
+    one ``iter_day`` replay per completed day with that day's alive list;
+    llm-seeds: one discarded draw per recorded LLM_CALL), so the continued
+    run is byte-indistinguishable from one that never crashed as far as
+    deep replay is concerned: ``replay_live(run_dir, deep=True)`` over the
+    finished log re-executes days 0..N in one process and must reproduce
+    the head.
+
+    Refuses to resume when: the chain fails verification; the run is
+    already finished; the log does not end at a clean boundary; the
+    config's ``live_config_sha``, the recorded ``template_version``, or the
+    spawned persona names disagree with the current code/config/personas
+    (a resumed run must not silently mix worlds — deep replay would fail).
+
+    Known cosmetic gap: ``reflections_skipped`` before the crash is
+    unrecoverable (skips emit no event by design) and restarts at 0.
+    """
+    t0 = time.perf_counter()
+    run_dir = Path(run_dir)
+    db_path = run_dir / "events.sqlite3"
+    config_path = run_dir / "config.toml"
+    if not db_path.exists() or not config_path.exists():
+        raise ValueError(f"{run_dir} is not a run directory (missing events.sqlite3/config.toml)")
+    cfg = load_live_config(config_path)
+
+    cards = load_personas(personas_dir if personas_dir is not None else _repo_personas_dir())
+    ordered_ids = founder_ids(cards)
+    if len(ordered_ids) < cfg.population.founders:
+        raise ValueError(
+            f"population.founders = {cfg.population.founders} but only "
+            f"{len(ordered_ids)} persona cards were found"
+        )
+    agent_ids = ordered_ids[: cfg.population.founders]
+    personas = {aid: cards[aid] for aid in agent_ids}
+    run_id = compute_live_run_id(cfg)
+
+    with EventStore(db_path) as store, TextsStore(db_path) as texts:
+        store.verify_chain()  # integrity before trusting a single byte
+        records = list(store.scan())
+        _validate_resumable(records, cfg, run_id, personas, agent_ids)
+        # Backend AFTER validation: a doomed resume must never load a model.
+        resolved_backend: ModelBackendP = (
+            backend if backend is not None else make_backend(cfg.model)
+        )
+        engine = _LiveEngine(cfg, store, texts, resolved_backend, personas, agent_ids)
+        start_day = _rebuild_engine_state(engine, records)
+        return _drive_to_completion(
+            engine,
+            cfg,
+            store,
+            run_dir,
+            run_id,
+            t0,
+            start_day=start_day,
+            difftest_interval=difftest_interval,
+            dashboard=dashboard,
+        )
+
+
+def _validate_resumable(
+    records: list[EventRecord],
+    cfg: LiveWorldConfig,
+    run_id: str,
+    personas: dict[str, PersonaCard],
+    agent_ids: list[str],
+) -> None:
+    """Refuse-loudly checks; every message states the disagreement found."""
+    founders = cfg.population.founders
+    if len(records) < 1 + founders:
+        raise ValueError("log is shorter than the spawn preamble; nothing to resume")
+    head = records[0]
+    if head.kind is not EventKind.RUN_STARTED or head.payload.get("mode") != "live":
+        raise ValueError("not a live run log (first event is not a live RUN_STARTED)")
+    if any(ev.kind is EventKind.RUN_FINISHED for ev in records):
+        raise ValueError("run is already finished; nothing to resume")
+    if head.payload.get("run_id") != run_id or head.payload.get("config_sha") != live_config_sha(
+        cfg
+    ):
+        raise ValueError(
+            "recorded run_id/config_sha disagree with the run dir's config.toml: "
+            "the config changed since the run started"
+        )
+    if head.payload.get("template_version") != TEMPLATE_VERSION:
+        raise ValueError(
+            f"run was recorded under template {head.payload.get('template_version')!r} but "
+            f"the current code renders {TEMPLATE_VERSION!r}: resuming would mix prompt "
+            "templates within one run (deep replay would fail)"
+        )
+    spawns = records[1 : 1 + founders]
+    for ev, aid in zip(spawns, agent_ids, strict=True):
+        if ev.kind is not EventKind.AGENT_SPAWNED or ev.payload.get("agent_id") != aid:
+            raise ValueError("spawn preamble does not match the configured founders")
+        if ev.payload.get("name") != personas[aid].name:
+            raise ValueError(
+                f"agent {aid} was spawned as {ev.payload.get('name')!r} but the current "
+                f"persona card says {personas[aid].name!r}: personas changed since the run"
+            )
+    last = records[-1]
+    clean_preamble = len(records) == 1 + founders
+    clean_night = last.kind is EventKind.PHASE_STARTED and last.payload.get("phase") == "night"
+    if not (clean_preamble or clean_night):
+        raise ValueError(
+            f"log does not end at a clean day boundary (last event: {last.kind.value} "
+            f"day {last.day} tick {last.tick}) — the store is corrupt or foreign"
+        )
+
+
+def _rebuild_engine_state(engine: _LiveEngine, records: list[EventRecord]) -> int:
+    """Fold ``records`` into a fresh engine; return the first day to run.
+
+    Mirrors the live path exactly: every record goes through the ledgers and
+    world fold in commit order; counters refold from payloads; both RNG
+    streams are advanced by replaying their recorded consumption (the
+    scheduler consumed ``rounds_per_day`` shuffles per completed day, keyed
+    by that day's spawn-order alive list; llm-seeds consumed exactly one
+    draw per LLM_CALL committed).
+    """
+    alive_in_spawn_order = list(engine.agent_ids)
+    day_alive: dict[int, list[str]] = {}
+    tick_calls: dict[tuple[int, int], int] = {}
+    tick_forfeited: set[tuple[int, int]] = set()
+    last_day = -1
+    for ev in records:
+        engine.ledgers.apply(ev)
+        engine.world.apply(ev)
+        payload = ev.payload
+        if ev.kind is EventKind.DAY_STARTED:
+            day = _payload_int(payload, "day", ev.seq)
+            day_alive[day] = list(alive_in_spawn_order)
+            last_day = max(last_day, day)
+        elif ev.kind is EventKind.AGENT_DIED:
+            alive_in_spawn_order.remove(ev.actor)
+        elif ev.kind is EventKind.PHASE_STARTED and payload.get("phase") == "night":
+            engine.night_tick = ev.tick
+        elif ev.kind is EventKind.LLM_CALL:
+            engine.llm_calls += 1
+            engine.usage_in_total += _payload_int(payload, "usage_in", ev.seq)
+            engine.usage_out_total += _payload_int(payload, "usage_out", ev.seq)
+            if payload.get("purpose") == "reflection":
+                pass  # reflection calls never retry
+            else:
+                key = (ev.day, ev.tick)
+                tick_calls[key] = tick_calls.get(key, 0) + 1
+        elif ev.kind is EventKind.REFLECTION:
+            engine.reflections += 1
+        elif ev.kind is EventKind.ACTION:
+            if payload.get("degraded"):
+                engine.degraded += 1
+                reason = payload.get("reason")
+                if reason == "spent":
+                    engine.spent_skips += 1
+                elif reason == "malformed":
+                    engine.malformed_forfeits += 1
+                    tick_forfeited.add((ev.day, ev.tick))
+            engine.last_action[ev.actor] = str(payload.get("type", "-"))
+        elif ev.kind is EventKind.TASK_ATTEMPT:
+            engine.attempts += 1
+            task_id = _payload_str(payload, "task_id", ev.seq)
+            if payload.get("verified"):
+                engine.discoveries += 1
+                engine.discoveries_by_agent[ev.actor] += 1
+                engine.first_verified.add(task_id)
+                engine.bounties_paid.add((ev.actor, task_id))
+                if payload.get("first_in_world"):
+                    engine.first_discoveries += 1
+    retried = [key for key, count in tick_calls.items() if count > 1]
+    engine.retries = len(retried)
+    engine.retry_recovered = sum(1 for key in retried if key not in tick_forfeited)
+    engine.emitted = len(records)
+
+    for day in sorted(day_alive):
+        # iter_day consumes the scheduler stream at CALL time (the whole day
+        # is precomputed); the returned iterator is deliberately discarded.
+        engine.scheduler.iter_day(day, day_alive[day])
+    for _ in range(engine.llm_calls):
+        engine.llm_seeds.randrange(2**31)
+    return last_day + 1
 
 
 # ---------------------------------------------------------------- replay_live

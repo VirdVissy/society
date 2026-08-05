@@ -39,6 +39,8 @@ from __future__ import annotations
 
 import importlib
 import json
+import sys
+import time
 from collections import deque
 from collections.abc import Callable
 from typing import Any
@@ -199,8 +201,21 @@ class AnthropicBackend:
 
     Empty or truncated responses (refusal / max_tokens stop reasons) come
     back as ordinary text for the runner's parse-retry-forfeit protocol —
-    no special-casing, no policy here. The client retries 429/5xx itself
-    (``max_retries=5``) which only affects wall-clock, never content.
+    no special-casing, no policy here.
+
+    TRANSIENT-ERROR PATIENCE (the one exception to "no policy"): a
+    multi-hour society run makes thousands of calls, so a sustained 429/529
+    window WILL eventually outlast the SDK's internal retries
+    (``max_retries=5``, ~a minute of backoff). ``generate`` therefore wraps
+    the call in an outer patience loop — up to ``_OUTER_ATTEMPTS`` tries,
+    sleeping ``min(120, 15 * 2^k)`` seconds between them (~12 minutes of
+    total tolerance) and logging each wait to stderr. Only transient
+    classes are retried: connection errors, 408/409/429, and >= 500.
+    Permanent errors (400 bad request, 401 auth, 404) propagate
+    immediately — the acceptance-run 529 death motivated this; a billing
+    400 must still fail fast. Content is never affected: a retried call
+    either eventually returns a response (recorded as truth in the chain)
+    or the run halts as before.
     """
 
     _NO_SAMPLING_PREFIXES = (
@@ -210,6 +225,8 @@ class AnthropicBackend:
         "claude-fable",
     )
     _DISABLE_THINKING_PREFIXES = ("claude-sonnet-5",)
+    _OUTER_ATTEMPTS = 8
+    _RETRYABLE_STATUSES = frozenset({408, 409, 429}) | frozenset(range(500, 600))
 
     def __init__(self, model_id: str) -> None:
         anthropic = importlib.import_module("anthropic")  # lazy: optional [api] extra
@@ -217,7 +234,33 @@ class AnthropicBackend:
         # (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / an `ant auth login`
         # profile). Never hardcode or log a key.
         self._client: Any = anthropic.Anthropic(max_retries=5)
+        self._err_status: type[Exception] = anthropic.APIStatusError
+        self._err_connection: type[Exception] = anthropic.APIConnectionError
         self.model_id = model_id
+
+    def _is_transient(self, exc: Exception) -> bool:
+        if isinstance(exc, self._err_connection):
+            return True
+        if isinstance(exc, self._err_status):
+            return getattr(exc, "status_code", 0) in self._RETRYABLE_STATUSES
+        return False
+
+    def _create_with_patience(self, request: dict[str, Any]) -> Any:
+        for attempt in range(self._OUTER_ATTEMPTS):
+            try:
+                return self._client.messages.create(**request)
+            except Exception as exc:
+                if not self._is_transient(exc) or attempt == self._OUTER_ATTEMPTS - 1:
+                    raise
+                delay = min(120, 15 * 2**attempt)
+                print(
+                    f"[serving] transient API error ({type(exc).__name__}); "
+                    f"outer retry {attempt + 1}/{self._OUTER_ATTEMPTS - 1} in {delay}s",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                time.sleep(delay)
+        raise AssertionError("unreachable")  # pragma: no cover
 
     def generate(self, prompt: str, params: GenParams) -> GenResult:
         envelope = json.loads(prompt)
@@ -236,7 +279,7 @@ class AnthropicBackend:
             request["temperature"] = params.temp_permille / 1000  # API boundary only
         if self.model_id.startswith(self._DISABLE_THINKING_PREFIXES):
             request["thinking"] = {"type": "disabled"}
-        response = self._client.messages.create(**request)
+        response = self._create_with_patience(request)
         text = "".join(
             block.text for block in response.content if getattr(block, "type", "") == "text"
         )

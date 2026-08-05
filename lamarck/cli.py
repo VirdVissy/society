@@ -41,7 +41,13 @@ from rich.console import Console
 from rich.table import Table
 
 from lamarck.engine import load_live_config, load_world_config
-from lamarck.live import LiveReplayResult, LiveRunSummary, compute_live_run_id, run_live
+from lamarck.live import (
+    LiveReplayResult,
+    LiveRunSummary,
+    compute_live_run_id,
+    resume_live,
+    run_live,
+)
 from lamarck.live import replay_live as replay_live_run
 from lamarck.sim import compute_run_id, run_sim
 from lamarck.sim import replay as replay_stub_run
@@ -235,6 +241,81 @@ def live(
         difftest_interval=difftest_interval,
         dashboard=dashboard,
     )
+    _print_live_summary(summary)
+
+
+@app.command()
+def resume(
+    run_dir: Annotated[
+        Path,
+        typer.Argument(exists=True, file_okay=False, help="Interrupted live run directory."),
+    ],
+    difftest_interval: Annotated[
+        int,
+        typer.Option(
+            "--difftest-interval",
+            min=0,
+            help="Dusk difftest every K days (0 disables per-dusk checks).",
+        ),
+    ] = 10,
+    dashboard: Annotated[
+        bool,
+        typer.Option("--dashboard/--no-dashboard", help="Per-day rich live table."),
+    ] = False,
+    scripted_module: Annotated[
+        str | None,
+        typer.Option(
+            "--scripted-module",
+            help=(
+                "TEST/CI SEAM for backend='scripted': MODULE:FACTORY naming a zero-arg "
+                "factory returning a (prompt, params) -> str callable."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Continue an interrupted live run from its last completed day.
+
+    The run's own config.toml is the configuration; the log is verified,
+    the engine state is rebuilt from it, and days continue until
+    world.days or extinction. Refuses finished, foreign, or mixed-template
+    runs — see resume_live's docstring for the exact checks.
+    """
+    try:
+        cfg = load_live_config(run_dir / "config.toml")
+    except (ValueError, OSError) as err:
+        _err.print(f"[red]error:[/red] failed to load {run_dir / 'config.toml'}: {err}")
+        raise typer.Exit(code=2) from err
+
+    backend = None
+    if cfg.model.backend == "scripted":
+        if scripted_module is None:
+            _err.print(
+                "[red]error:[/red] backend 'scripted' has no default script: pass "
+                "--scripted-module MODULE:FACTORY (test/CI seam, e.g. tests.scripted_llm:make)"
+            )
+            raise typer.Exit(code=2)
+        try:
+            backend = _load_scripted_backend(scripted_module)
+        except (ValueError, ImportError, AttributeError, TypeError) as err:
+            _err.print(f"[red]error:[/red] failed to load --scripted-module: {err}")
+            raise typer.Exit(code=2) from err
+    elif scripted_module is not None:
+        _err.print(
+            "[red]error:[/red] --scripted-module is a test/CI seam for backend='scripted'; "
+            f"this config uses backend={cfg.model.backend!r}"
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        summary = resume_live(
+            run_dir,
+            backend=backend,  # type: ignore[arg-type]  # ScriptedBackend | None
+            difftest_interval=difftest_interval,
+            dashboard=dashboard,
+        )
+    except ValueError as err:
+        _err.print(f"[red]error:[/red] cannot resume: {err}")
+        raise typer.Exit(code=1) from err
     _print_live_summary(summary)
 
 
