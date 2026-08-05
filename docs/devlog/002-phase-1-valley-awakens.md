@@ -71,6 +71,31 @@ Both halted runs were also unplanned stability tests: 19 combined
 unattended sim-days, zero unhandled sim exceptions (the two halts were
 external: billing, and my kill).
 
+### Pivot 4 — resume + patience, then the inventory fallacy
+
+The final acceptance run died at day 12 to a sustained API 529 window.
+Two permanent pieces of infrastructure came out of it: an outer patience
+loop in the cloud backend (transient classes only; ~12 min tolerance;
+permanent 4xx still fail fast) and **`lamarck resume`** — day-batch
+transactions guarantee a clean boundary, the engine refolds from the log,
+and both RNG streams replay their recorded consumption exactly; the
+reconstruction prover is deep replay of an interrupted-then-resumed run
+reproducing the head byte-for-byte. The run resumed from day 13 with all
+paid state intact — resume's first production use.
+
+The resumed run then surfaced world-design finding #4: **the inventory
+fallacy**. Agents mastered tier-1 (172 attempts after resume) but made
+only two tier-2 attempts, both using a discovered product as a step-1
+ingredient — they model products as stored inventory; the world requires
+re-derivation within each attempt, and the only worked example was
+single-step. Template p1.5 teaches the chain ("THE CRUCIBLE EMPTIES
+BETWEEN ATTEMPTS" + a two-step worked example). Runner-side validation of
+ingredient availability was considered and rejected on principle: step
+N's availability depends on step N−1's hidden product — the universe
+stays the only judge of chemistry. Halted at day ~20 rather than pay for
+an unreachable gate; the canary protocol gained a chaining gate (≥1
+verified tier-2 by day 4) before any full launch.
+
 ## Measured numbers
 
 - **Local baseline** (mlx, Qwen3-4B-4bit, M3 Pro, template p1.0): 2-day
