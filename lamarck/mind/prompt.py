@@ -37,7 +37,7 @@ __all__ = [
     "render_user",
 ]
 
-TEMPLATE_VERSION = "p2.1"  # p2.1: auto-claim, no citation (p2.0 satchel; p1.x: see git log)
+TEMPLATE_VERSION = "p2.2"  # p2.2: satchel-ladder guidance (p2.1 auto-claim; p2.0 satchel)
 
 _ACTION_CLOSING = "Choose your action now. Reply with exactly one JSON object."
 _REFLECTION_CLOSING = (
@@ -92,6 +92,8 @@ def render_system(persona: PersonaCard) -> str:
         "\n"
         "Observe before you spend; the task board lists what the valley pays for.\n"
         "Experiment in small steps and read what each combination leaves behind.\n"
+        "The five base pairs run out fast: higher commissions come from combining\n"
+        "your satchel compounds with bases and with each other.\n"
         "Speak with those beside you — knowledge shared compounds.\n"
         "Write notes on what you learn; notes are the only memory that survives the day."
     )
