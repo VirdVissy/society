@@ -136,6 +136,16 @@ also surfaced and fixed a latent replay coupling: `CachedBackend` now
 keys recorded calls by RNG seed instead of arrival order, so deep replay
 can never depend on generation order again.
 
+Canary-9 (the revalidation pair under wave semantics, Haiku 4.5, 4 days,
+8-wide, ~$2.6) passed the pre-registered bar in both arms — and then
+some. Arm 1: 16 distinct (all 8 tier-1, 7/8 tier-2, and **wx-t3-1, the
+valley's first tier-3 ever**, day 2, built from an earned tier-2
+satchel), 6.2 min wall. Arm 2: 11 distinct (8 tier-1, 3 tier-2), 5.1 min
+wall. Both deep replays byte-identical on real concurrent cloud traffic.
+~80 s/sim-day at rate tier 1 — a 30-day run now projects to ~40–50 min,
+down from ~5.5–6 h. Simultaneity did not hurt discovery; if anything the
+denser rounds compound satchels faster.
+
 ## Measured numbers
 
 - **Local baseline** (mlx, Qwen3-4B-4bit, M3 Pro, template p1.0): 2-day
