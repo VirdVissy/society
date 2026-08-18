@@ -140,6 +140,22 @@ def test_live_config_sha_stable_across_loads() -> None:
     assert set(sha_a) <= set("0123456789abcdef")
 
 
+def test_synthesized_config_round_trips_every_field(tmp_path: Path) -> None:
+    """Regression (canary9 launch failure): the synthesized run-dir
+    config.toml must round-trip ``live_config_sha`` even when NON-DEFAULT
+    values are set on fields added after the writer was born
+    (wave_concurrency shipped without a writer line and only the cloud
+    config's non-default 8 could catch it)."""
+    from lamarck.live import _live_config_toml_text
+
+    cfg = load_live_config(_CONFIGS / "valley-cloud.toml")
+    assert cfg.model.wave_concurrency != 1  # the guard only bites off-default
+    cfg = cfg.model_copy(update={"world": cfg.world.model_copy(update={"days": 4})})
+    dest = tmp_path / "config.toml"
+    dest.write_text(_live_config_toml_text(cfg), encoding="utf-8")
+    assert live_config_sha(load_live_config(dest)) == live_config_sha(cfg)
+
+
 def test_live_sha_covers_more_than_base_sha() -> None:
     """The live fingerprint covers [model]/[universe]/[live]; the stub
     fingerprint of the same file's base sections must differ from it."""

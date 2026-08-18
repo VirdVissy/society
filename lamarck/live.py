@@ -469,6 +469,7 @@ def _live_config_toml_text(cfg: LiveWorldConfig) -> str:
         f"temp_permille = {m.temp_permille}",
         f"seed = {m.seed}",
         f"prompt_budget_chars = {m.prompt_budget_chars}",
+        f"wave_concurrency = {m.wave_concurrency}",
         "",
         "[universe]",
         f"name = {_toml_str(u.name)}",
