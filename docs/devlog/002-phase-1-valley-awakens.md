@@ -116,6 +116,26 @@ confusing paragraph existed only to explain the unintuitive world. Tier-2
 is now one new step atop an earned satchel; recipes remain undiscovered.
 The canary gate (≥1 verified tier-2 by day 4) now tests the redesign.
 
+### Pivot 6 — simultaneous rounds (time, not cost)
+
+With the launch bar green (both canary-8 arms passed), the binding
+constraint became wall-clock: at API rate tier 1 (~50k input tokens/min)
+a sequential 30-day run is ~5.5–6 h. Cost was ruled fine as-is; time was
+not. The fix is architectural: an ACTION round now snapshots every
+perception before any commit, flies all primary calls as one concurrent
+wave (`model.wave_concurrency`, 8 in the cloud config), retries as a
+second wave, and commits strictly in scheduler order — so the event log
+is provably concurrency-invariant (a jitter-scrambled 8-wide run
+reproduces the sequential chain head byte-for-byte;
+`tests/test_live_waves.py`). This is also a deliberate world-rule change:
+agents act simultaneously within a round, and speech lands next round —
+which invalidates the canary-8 evidence and requires a fresh canary pair
+before the acceptance run. A day collapses from ~96 sequential calls to
+~10 waves; expected wall at tier 2 is ~1–1.5 h for 30 days. The refactor
+also surfaced and fixed a latent replay coupling: `CachedBackend` now
+keys recorded calls by RNG seed instead of arrival order, so deep replay
+can never depend on generation order again.
+
 ## Measured numbers
 
 - **Local baseline** (mlx, Qwen3-4B-4bit, M3 Pro, template p1.0): 2-day

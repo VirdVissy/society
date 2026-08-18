@@ -36,7 +36,7 @@ VALLEY_TOML = _CONFIGS / "valley.toml"
 
 # Pinned 2026-07-23 (computed once, then frozen — see module docstring).
 PHASE0_WORLD_CONFIG_SHA = "24cbbf0eaf5426eb509b8bd1b755c18877e4e9822644e180bc85dd72aa5c66cb"
-VALLEY_LIVE_CONFIG_SHA = "f6f6bbd348e03d8a174c2047c37fbeb5a33186e27a18ef60e17eb5ff39a47cc2"
+VALLEY_LIVE_CONFIG_SHA = "f4585137549372f74615e3e063ba0b85db810be04da28faba4dd2ade503638d3"
 
 
 def _variant(tmp_path: Path, transform: Callable[[str], str]) -> Path:

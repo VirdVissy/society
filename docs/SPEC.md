@@ -290,6 +290,23 @@ the build waves:
   environment only — never config, never logs, never payloads. Weight-level
   phases (3+) still require local models for the trainable population; the
   mlx path stays first-class.
+- **Simultaneous rounds** (ratified 2026-08-18, time-optimization): an
+  ACTION round is one wave — every living agent's perception snapshots
+  BEFORE any of the round's commits, primary calls fly concurrently
+  (transport width `min(model.wave_concurrency, founders)`; default 1),
+  retries as a second wave, and all events commit strictly in scheduler
+  order. The event log is concurrency-invariant (byte-identical chain head
+  at any width under any completion order — pinned by
+  `tests/test_live_waves.py`). World-rule consequence, deliberate: agents
+  act simultaneously within a round, so speech/travel/trades land for
+  OTHERS at the next round's perception, never mid-round (the fold-level
+  "delivers at emission" rule is unchanged — emission is the commit, and
+  commits close the round). RNG: primary seeds draw at snapshot in
+  scheduler order, retry seeds after the primary wave in lane order; the
+  retry allowance pre-check includes the lane's uncommitted primary bill.
+  Dusk reflections wave identically (lanes never observe each other). Deep
+  replay always re-executes at width 1; `CachedBackend` keys recorded
+  calls by seed, so generation order can never matter.
 
 ## 9. Deviations from PLAN.md §3 (recorded, deliberate)
 

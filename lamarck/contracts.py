@@ -520,13 +520,19 @@ class PerceptionView(BaseModel):
 
 class ModelSection(BaseModel):
     model_config = ConfigDict(frozen=True)
-    backend: str  # "mlx" | "scripted"
+    backend: str  # "mlx" | "anthropic" | "scripted"
     model_id: str
     max_tokens: int = Field(ge=1)
     reflection_max_tokens: int = Field(ge=1)
     temp_permille: int = Field(ge=0, le=2000)
     seed: int = Field(ge=0)
     prompt_budget_chars: int = Field(ge=1000)
+    wave_concurrency: int = Field(default=1, ge=1, le=16)
+    """Transport-level concurrency for simultaneous rounds (2026-08-18):
+    perceptions snapshot at round start, all lanes' model calls may fly
+    concurrently, and results COMMIT in scheduler order — the event log and
+    every replay stay byte-identical at any concurrency (tested). 1 =
+    sequential (CI/scripted/mlx); cloud configs raise it to ~founders."""
 
 
 class UniverseSection(BaseModel):

@@ -46,6 +46,7 @@ reflection_max_tokens = 160
 temp_permille = 700               # passed as temperature on models that accept it
 seed = 3735928559                 # recorded in LLM_CALL payloads; inert on the API
 prompt_budget_chars = 14000
+wave_concurrency = 8         # simultaneous rounds: 8 concurrent calls per wave
 
 [universe]
 name = "wuxing"

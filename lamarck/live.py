@@ -29,10 +29,12 @@ below are pinned — the live golden test freezes the chain head)
    error (ValueError).
 3. Per day d, inside one ``store.batch()``: DAY_STARTED then the day's
    slots exactly as the stub (PHASE_STARTED at each transition), except:
-   - ACTION slots run the COGNITION LOOP below;
+   - ACTION slots run the COGNITION LOOP below, grouped into SIMULTANEOUS
+     ROUNDS (see that section);
    - the DUSK slot inserts per-agent REFLECTION passes (spawn order,
-     living agents) BEFORE deaths; deaths (qi <= 0, spawn order) and the
-     periodic difftest follow, exactly as the stub.
+     living agents, one wave — reflection lanes never observe each other)
+     BEFORE deaths; deaths (qi <= 0, spawn order) and the periodic
+     difftest follow, exactly as the stub.
    Buffered prompt texts flush to the ``llm_texts`` side table right AFTER
    the day's batch commits (TextsStore writes never overlap a batch).
 4. Termination, RUN_FINISHED ``{days_elapsed, final_state_sha}`` (canonical
@@ -116,6 +118,28 @@ Every committed record — markers included — is applied to the live ledgers
 AND the world fold, in commit order.
 
 ========================================================================
+SIMULTANEOUS ROUNDS (2026-08-18)
+========================================================================
+An ACTION round is one wave, not a sequence: every living agent's
+perception is snapshotted BEFORE any of the round's commits, all primary
+model calls fly concurrently (``ThreadPoolExecutor``, transport width =
+``min(model.wave_concurrency, founders)``), retries fly as a second wave,
+and every event then commits strictly in scheduler order. Consequences,
+all pinned by tests/test_live_waves.py:
+- The event log is CONCURRENCY-INVARIANT: byte-identical chain head at
+  any wave width, under any completion order.
+- World rule (deliberate): agents act simultaneously within a round —
+  speech, travel, and trades land for OTHERS at the next round's
+  perception, never mid-round.
+- RNG discipline: primary seeds draw at snapshot time in lane
+  (scheduler) order; retry seeds draw after the primary wave, in lane
+  order. Skipped (spent) lanes still consume nothing.
+- The retry allowance pre-check arithmetically includes the lane's not
+  yet committed primary bill.
+- Deep replay always runs at concurrency 1; ``CachedBackend`` keys
+  recorded calls by seed, so generation order never matters.
+
+========================================================================
 REPLAY
 ========================================================================
 Shallow (``replay_live(run_dir)``): verify_chain from genesis; exactly one
@@ -128,9 +152,9 @@ adjust must follow back-to-back with exact payload and arithmetic;
 trade adjust pairing re-checks. Model-free.
 Deep (``deep=True``): all shallow checks, then RE-EXECUTE ``run_live``
 into a throwaway directory with a ``CachedBackend`` serving the recorded
-LLM_CALL events in order — each served call LMK_ASSERTs that the re-derived
-prompt sha and GenParams match the record — and the final chain heads must
-match byte-for-byte. Verification differences are returned in
+LLM_CALL events keyed by seed — each served call LMK_ASSERTs that the
+re-derived prompt sha and GenParams match the record — and the final chain
+heads must match byte-for-byte. Verification differences are returned in
 ``mismatches``, never raised.
 
 Determinism: no wall clock in any payload, no set iteration (the
@@ -144,7 +168,9 @@ from __future__ import annotations
 import re
 import tempfile
 import time
+import unicodedata
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -280,13 +306,18 @@ def _repo_personas_dir() -> Path:
 
 
 class CachedBackend:
-    """Deep-replay backend: serves a run's recorded LLM_CALL events in seq
-    order. Each ``generate`` pops the next record, LMK_ASSERTs that the
-    re-executed runner's prompt sha and GenParams match what was recorded,
-    and returns the recorded response and usage. Exhaustion (the re-run
-    asking for MORE calls than were recorded) is an assertion failure."""
+    """Deep-replay backend: serves a run's recorded LLM_CALL events keyed by
+    the call's RNG ``seed`` (the llm-seeds stream draws one distinct seed per
+    call, so the seed names the call uniquely regardless of the order the
+    engine issues generates in — wave order and commit order differ once a
+    round has retries). Each ``generate`` looks up its seed's record,
+    LMK_ASSERTs that the re-executed runner's prompt sha and remaining
+    GenParams match what was recorded, and returns the recorded response and
+    usage. An unknown seed or a double-serve (the re-run asking for calls
+    that were never recorded) is an assertion failure."""
 
     def __init__(self, records: list[EventRecord]) -> None:
+        self._by_seed: dict[int, EventRecord] = {}
         for rec in records:
             LMK_ASSERT(
                 rec.kind is EventKind.LLM_CALL,
@@ -294,30 +325,42 @@ class CachedBackend:
                 seq=rec.seq,
                 kind=str(rec.kind),
             )
-        self._records = list(records)
-        self._next = 0
+            seed = rec.payload.get("seed")
+            LMK_ASSERT(
+                isinstance(seed, int) and seed not in self._by_seed,
+                "CachedBackend requires a unique integer seed per LLM_CALL",
+                seq=rec.seq,
+                seed=seed,
+            )
+            assert isinstance(seed, int)  # narrowed by the LMK_ASSERT above
+            self._by_seed[seed] = rec
+        self._total = len(records)
+        self._served = 0
 
     @property
     def exhausted(self) -> bool:
         """True when every recorded call has been served."""
-        return self._next >= len(self._records)
+        return self._served >= self._total
 
     @property
     def served(self) -> int:
-        return self._next
+        return self._served
 
     @property
     def total(self) -> int:
-        return len(self._records)
+        return self._total
 
     def generate(self, prompt: str, params: GenParams) -> GenResult:
+        rec = self._by_seed.pop(params.seed, None)
         LMK_ASSERT(
-            self._next < len(self._records),
-            "deep replay requested more model calls than were recorded",
-            recorded=len(self._records),
+            rec is not None,
+            "deep replay requested a model call that was never recorded",
+            seed=params.seed,
+            recorded=self._total,
+            served=self._served,
         )
-        rec = self._records[self._next]
-        self._next += 1
+        assert rec is not None  # narrowed by the LMK_ASSERT above
+        self._served += 1
         payload = rec.payload
         got_sha = prompt_sha(prompt)
         LMK_ASSERT(
@@ -327,17 +370,13 @@ class CachedBackend:
             recorded=payload.get("prompt_sha256"),
             re_derived=got_sha,
         )
-        recorded_params = (
-            payload.get("max_tokens"),
-            payload.get("temp_permille"),
-            payload.get("seed"),
-        )
+        recorded_params = (payload.get("max_tokens"), payload.get("temp_permille"))
         LMK_ASSERT(
-            recorded_params == (params.max_tokens, params.temp_permille, params.seed),
+            recorded_params == (params.max_tokens, params.temp_permille),
             "deep replay GenParams mismatch",
             seq=rec.seq,
             recorded=recorded_params,
-            re_derived=(params.max_tokens, params.temp_permille, params.seed),
+            re_derived=(params.max_tokens, params.temp_permille),
         )
         return GenResult(
             text=_payload_str(payload, "response", rec.seq),
@@ -475,6 +514,33 @@ class _Verdict(NamedTuple):
 _NO_ACTION = _Verdict(None, ActionType.REST, {}, 0, "")
 
 
+def _normalized_response(raw: str) -> str:
+    """Sanitize + NFC-normalize a model reply EXACTLY as the store will,
+    so wave-time validation parses the same bytes the chain commits."""
+    return unicodedata.normalize("NFC", sanitize_model_text(raw))
+
+
+@dataclass
+class _Lane:
+    """One agent's slot inside a simultaneous round (mutable wave state)."""
+
+    tick: int
+    actor: str
+    system: str = ""
+    user: str = ""
+    prompt: str = ""
+    params: GenParams = None  # type: ignore[assignment]  # set for non-spent lanes
+    spent: bool = False
+    result: GenResult | None = None
+    text: str | None = None
+    verdict: _Verdict | None = None
+    retry_prompt: str | None = None
+    retry_params: GenParams | None = None
+    retry_result: GenResult | None = None
+    retry_text: str | None = None
+    forfeited: bool = False
+
+
 class _LiveEngine:
     """Mutable run state + the cognition loop (internal to run_live)."""
 
@@ -493,6 +559,7 @@ class _LiveEngine:
         self.backend = backend
         self.personas = personas
         self.agent_ids = agent_ids  # spawn order
+        self.concurrency = 1  # wave transport concurrency; callers may raise it
         self.name_to_id = {personas[aid].name: aid for aid in agent_ids}
         self.ledgers = Ledgers(cfg)
         self.world = WorldStateFold(cfg)
@@ -612,17 +679,48 @@ class _LiveEngine:
         est = qi_llm_cost(_ceil_div(prompt_chars, 2), max_tokens) + surcharge
         return self.ledgers.allowance.remaining(actor) >= est
 
-    def model_call(
-        self, actor: str, prompt: str, purpose: str, max_tokens: int, day: int, tick: int
-    ) -> EventRecord:
-        """One billed model call: seed draw, generate, sanitize, commit
-        LLM_CALL, buffer the prompt text. Returns the committed record."""
-        seed = self.llm_seeds.randrange(_SEED_BOUND)
-        params = GenParams(
-            max_tokens=max_tokens, temp_permille=self.cfg.model.temp_permille, seed=seed
+    def draw_params(self, max_tokens: int) -> GenParams:
+        """One llm-seeds draw — ALWAYS in scheduler/lane order (the pinned
+        deterministic seed-assignment rule for waves)."""
+        return GenParams(
+            max_tokens=max_tokens,
+            temp_permille=self.cfg.model.temp_permille,
+            seed=self.llm_seeds.randrange(_SEED_BOUND),
         )
-        result = self.backend.generate(prompt, params)
-        text = sanitize_model_text(result.text)
+
+    def generate_wave(self, jobs: list[tuple[str, GenParams]]) -> list[GenResult]:
+        """Generate all jobs, returning results in JOB ORDER.
+
+        Concurrency is a pure transport detail: with ``self.concurrency > 1``
+        the calls fly on a thread pool, but nothing downstream can observe
+        arrival order — commits happen strictly in lane order from the
+        returned list. Sequential when concurrency is 1 (CI, scripted, mlx,
+        every replay path)."""
+        if self.concurrency <= 1 or len(jobs) <= 1:
+            return [self.backend.generate(prompt, params) for prompt, params in jobs]
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(self.concurrency, len(jobs))) as pool:
+            futures = [pool.submit(self.backend.generate, p, gp) for p, gp in jobs]
+            return [f.result() for f in futures]
+
+    def commit_call(
+        self,
+        actor: str,
+        prompt: str,
+        purpose: str,
+        params: GenParams,
+        result: GenResult,
+        response_text: str,
+        day: int,
+        tick: int,
+    ) -> EventRecord:
+        """Commit one already-generated model call (LLM_CALL + text buffer).
+
+        ``response_text`` is the sanitized, NFC-normalized string the wave
+        already validated against; the committed record must equal it
+        byte-for-byte (asserted) — the parse-the-committed-truth invariant,
+        preserved under waves by normalizing exactly as the store does."""
         rec = self.commit(
             EventDraft(
                 day=day,
@@ -636,14 +734,19 @@ class _LiveEngine:
                     "adapter": "",
                     "prompt_sha256": prompt_sha(prompt),
                     "temp_permille": self.cfg.model.temp_permille,
-                    "max_tokens": max_tokens,
-                    "seed": seed,
-                    "response": text,
+                    "max_tokens": params.max_tokens,
+                    "seed": params.seed,
+                    "response": response_text,
                     "usage_in": result.usage_in,
                     "usage_out": result.usage_out,
                 },
                 qi_delta=-qi_llm_cost(result.usage_in, result.usage_out),
             )
+        )
+        LMK_ASSERT(
+            rec.payload["response"] == response_text,
+            "committed response diverged from the wave-validated text",
+            seq=rec.seq,
         )
         self.texts_buffer.append((rec.seq, prompt))
         self.llm_calls += 1
@@ -724,44 +827,114 @@ class _LiveEngine:
         )
         self.degraded += 1
 
-    def action_slot(self, day: int, rnd: int, tick: int, actor: str) -> None:
-        """One cognition-loop ACTION slot (module docstring, pinned)."""
-        cfg = self.cfg
-        view = enforce_budget(self.view(actor, day, rnd, tick), cfg.model.prompt_budget_chars)
-        system = render_system(self.personas[actor])
-        user = render_user(view)
-        prompt = build_prompt(system, user)
+    def action_round(self, day: int, rnd: int, slots: list[tuple[int, str]]) -> None:
+        """One SIMULTANEOUS round (2026-08-18): the whole round's perceptions
+        are snapshotted BEFORE any of its commits, all primary calls fly as
+        one wave, retries as a second wave, and everything commits in
+        scheduler order. Nothing downstream can observe generation order —
+        the log is identical at any wave concurrency (tested).
 
-        if not self.precheck(actor, len(prompt), cfg.model.max_tokens, self.max_surcharge):
+        World-rule consequence, deliberate: within a round, agents act
+        simultaneously — speech, travel, and trades land for OTHERS at the
+        next round's perception, never mid-round. Retry seed draws happen
+        after the primary wave, in lane order; the retry allowance pre-check
+        arithmetically includes the (not yet committed) primary bill.
+        """
+        cfg = self.cfg
+        lanes: list[_Lane] = []
+        for tick, actor in slots:
+            view = enforce_budget(self.view(actor, day, rnd, tick), cfg.model.prompt_budget_chars)
+            system = render_system(self.personas[actor])
+            user = render_user(view)
+            prompt = build_prompt(system, user)
+            if not self.precheck(actor, len(prompt), cfg.model.max_tokens, self.max_surcharge):
+                lanes.append(_Lane(tick=tick, actor=actor, spent=True))
+                continue
+            lanes.append(
+                _Lane(
+                    tick=tick,
+                    actor=actor,
+                    system=system,
+                    user=user,
+                    prompt=prompt,
+                    params=self.draw_params(cfg.model.max_tokens),
+                )
+            )
+
+        active = [lane for lane in lanes if not lane.spent]
+        results = self.generate_wave([(lane.prompt, lane.params) for lane in active])
+        retry_lanes: list[_Lane] = []
+        for lane, result in zip(active, results, strict=True):
+            lane.result = result
+            lane.text = _normalized_response(result.text)
+            lane.verdict = self.validate_reply(lane.actor, lane.text)
+            if lane.verdict.failure is None:
+                continue
+            retry_user = lane.user + "\n\n" + retry_message(lane.verdict.failure)
+            retry_prompt = build_prompt(lane.system, retry_user)
+            primary_bill = qi_llm_cost(result.usage_in, result.usage_out)
+            est = (
+                qi_llm_cost(_ceil_div(len(retry_prompt), 2), cfg.model.max_tokens)
+                + self.max_surcharge
+            )
+            if self.ledgers.allowance.remaining(lane.actor) - primary_bill < est:
+                lane.forfeited = True
+                continue
+            lane.retry_prompt = retry_prompt
+            lane.retry_params = self.draw_params(cfg.model.max_tokens)  # lane order
+            retry_lanes.append(lane)
+
+        retry_results = self.generate_wave(
+            [(lane.retry_prompt, lane.retry_params) for lane in retry_lanes]  # type: ignore[misc]
+        )
+        for lane, result in zip(retry_lanes, retry_results, strict=True):
+            lane.retry_result = result
+            lane.retry_text = _normalized_response(result.text)
+            lane.verdict = self.validate_reply(lane.actor, lane.retry_text)
+            if lane.verdict.failure is not None:
+                lane.forfeited = True
+
+        for lane in lanes:
+            self._commit_lane(day, lane, retried=lane.retry_result is not None)
+
+    def _commit_lane(self, day: int, lane: _Lane, *, retried: bool) -> None:
+        """Commit one lane's events in the pinned order: primary LLM_CALL,
+        retry LLM_CALL, then the action/degrade/followups — identical to the
+        old sequential slot's commit stream."""
+        tick, actor = lane.tick, lane.actor
+        if lane.spent:
             self.emit_degraded_rest(day, tick, actor, {"reason": "spent"})
             self.spent_skips += 1
             self.last_action[actor] = "rest (spent)"
             return
-
-        rec = self.model_call(actor, prompt, "tick", cfg.model.max_tokens, day, tick)
-        verdict = self.validate_reply(actor, _payload_str(rec.payload, "response", rec.seq))
-
-        if verdict.failure is not None:
-            retry_user = user + "\n\n" + retry_message(verdict.failure)
-            retry_prompt = build_prompt(system, retry_user)
-            if not self.precheck(
-                actor, len(retry_prompt), cfg.model.max_tokens, self.max_surcharge
-            ):
-                self.emit_degraded_rest(day, tick, actor, {"reason": "malformed"})
-                self.malformed_forfeits += 1
-                self.last_action[actor] = "rest (malformed)"
-                return
+        assert lane.result is not None and lane.text is not None  # wave-guaranteed
+        self.commit_call(actor, lane.prompt, "tick", lane.params, lane.result, lane.text, day, tick)
+        if retried:
+            assert lane.retry_result is not None and lane.retry_text is not None
+            assert lane.retry_prompt is not None and lane.retry_params is not None
             self.retries += 1
-            rec = self.model_call(actor, retry_prompt, "tick", cfg.model.max_tokens, day, tick)
-            verdict = self.validate_reply(actor, _payload_str(rec.payload, "response", rec.seq))
-            if verdict.failure is not None:
-                self.emit_degraded_rest(day, tick, actor, {"reason": "malformed"})
-                self.malformed_forfeits += 1
-                self.last_action[actor] = "rest (malformed)"
-                return
+            self.commit_call(
+                actor,
+                lane.retry_prompt,
+                "tick",
+                lane.retry_params,
+                lane.retry_result,
+                lane.retry_text,
+                day,
+                tick,
+            )
+        if lane.forfeited:
+            self.emit_degraded_rest(day, tick, actor, {"reason": "malformed"})
+            self.malformed_forfeits += 1
+            self.last_action[actor] = "rest (malformed)"
+            return
+        if retried:
             self.retry_recovered += 1
 
+        verdict = lane.verdict
+        assert verdict is not None and verdict.failure is None  # wave-guaranteed
         atype, args = verdict.atype, verdict.args
+        cfg = self.cfg
         cost = cfg.qi.action_costs[atype]
         affordable = self.ledgers.allowance.can_spend(actor, cost)
         stones_delta = 0
@@ -875,10 +1048,13 @@ class _LiveEngine:
     # ------------------------------------------------------------------- dusk
 
     def dusk(self, day: int, tick: int, difftest_interval: int) -> None:
-        """Reflections (spawn order, living, skip-when-broke), then deaths,
-        then the periodic difftest — the pinned dusk order."""
+        """Reflections (spawn order, living, skip-when-broke) as ONE wave —
+        semantically identical to the old sequential pass, since reflection
+        lanes never observe each other — then deaths, then the periodic
+        difftest: the pinned dusk order."""
         cfg = self.cfg
         alive_at_dusk = self.ledgers.balances().alive
+        wave: list[tuple[str, str, GenParams]] = []  # (actor, prompt, params)
         for aid in self.agent_ids:
             if not alive_at_dusk[aid]:
                 continue
@@ -887,16 +1063,18 @@ class _LiveEngine:
             if not self.precheck(aid, len(prompt), cfg.model.reflection_max_tokens, 0):
                 self.reflections_skipped += 1
                 continue
-            rec = self.model_call(
-                aid, prompt, "reflection", cfg.model.reflection_max_tokens, day, tick
-            )
+            wave.append((aid, prompt, self.draw_params(cfg.model.reflection_max_tokens)))
+        results = self.generate_wave([(prompt, params) for _, prompt, params in wave])
+        for (aid, prompt, params), result in zip(wave, results, strict=True):
+            text = _normalized_response(result.text)
+            self.commit_call(aid, prompt, "reflection", params, result, text, day, tick)
             self.commit(
                 EventDraft(
                     day=day,
                     tick=tick,
                     kind=EventKind.REFLECTION,
                     actor=aid,
-                    payload={"text": _payload_str(rec.payload, "response", rec.seq)},
+                    payload={"text": text},
                 )
             )
             self.reflections += 1
@@ -932,7 +1110,10 @@ class _LiveEngine:
                 )
             )
             current_phase: DayPhase | None = None
-            for phase, rnd, tick, actor in self.scheduler.iter_day(day, alive_ids):
+            slots = list(self.scheduler.iter_day(day, alive_ids))
+            i = 0
+            while i < len(slots):
+                phase, rnd, tick, actor = slots[i]
                 if phase is not current_phase:
                     self.commit(
                         EventDraft(
@@ -945,11 +1126,20 @@ class _LiveEngine:
                     )
                     current_phase = phase
                 if phase is DayPhase.ACTION:
-                    self.action_slot(day, rnd, tick, actor)
-                elif phase is DayPhase.DUSK:
+                    # Consume the whole round as one simultaneous wave.
+                    round_slots: list[tuple[int, str]] = []
+                    j = i
+                    while j < len(slots) and slots[j][0] is DayPhase.ACTION and slots[j][1] == rnd:
+                        round_slots.append((slots[j][2], slots[j][3]))
+                        j += 1
+                    self.action_round(day, rnd, round_slots)
+                    i = j
+                    continue
+                if phase is DayPhase.DUSK:
                     self.dusk(day, tick, difftest_interval)
                 elif phase is DayPhase.NIGHT:
                     self.night_tick = tick
+                i += 1
         self.flush_texts()
 
     def any_alive(self) -> bool:
@@ -993,6 +1183,7 @@ def run_live(
     difftest_interval: int = 10,
     dashboard: bool = False,
     personas_dir: Path | None = None,
+    concurrency_override: int | None = None,
 ) -> LiveRunSummary:
     """Run the Phase-1 live world per the pinned layout; return the summary.
 
@@ -1038,6 +1229,11 @@ def run_live(
 
     with EventStore(db_path) as store, TextsStore(db_path) as texts:
         engine = _LiveEngine(cfg, store, texts, resolved_backend, personas, agent_ids)
+        engine.concurrency = (
+            concurrency_override
+            if concurrency_override is not None
+            else min(cfg.model.wave_concurrency, len(agent_ids))
+        )
         with store.batch():
             engine.spawn(run_id)
         return _drive_to_completion(
@@ -1216,6 +1412,7 @@ def resume_live(
             backend if backend is not None else make_backend(cfg.model)
         )
         engine = _LiveEngine(cfg, store, texts, resolved_backend, personas, agent_ids)
+        engine.concurrency = min(cfg.model.wave_concurrency, len(agent_ids))
         start_day = _rebuild_engine_state(engine, records)
         return _drive_to_completion(
             engine,
@@ -1648,6 +1845,7 @@ def replay_live(
                     difftest_interval=0,
                     dashboard=False,
                     personas_dir=personas_dir,
+                    concurrency_override=1,  # CachedBackend serves in seq order
                 )
         except Exception as err:  # assertion inside re-execution => verdict
             mismatches.append(f"deep replay re-execution failed: {err}")
