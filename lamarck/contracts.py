@@ -510,6 +510,12 @@ class PerceptionView(BaseModel):
     first-acquired order, deduped — the personal tech tree. Usable as
     experiment ingredients alongside bases (satchel world rule, 2026-08-05).
     Default [] keeps Phase-0-era fixtures valid."""
+    journal: list[tuple[str, str, str]] = Field(default_factory=list)
+    """Lab journal (2026-08-19): every ingredient pair this agent has ever
+    combined, with its product — ``(a, b, product)``, ingredients
+    alphabetical within an entry, first-tried order, deduped by pair.
+    Cumulative for life: the durable memory that lets an agent see which
+    pairs are already spent. Default [] keeps older fixtures valid."""
     tasks: list[TaskStub]  # the visible task board
     materials: list[int]  # stones cost by tier (from config)
     bounties: list[int]  # payout by tier (from config)

@@ -37,7 +37,7 @@ __all__ = [
     "render_user",
 ]
 
-TEMPLATE_VERSION = "p2.2"  # p2.2: satchel-ladder guidance (p2.1 auto-claim; p2.0 satchel)
+TEMPLATE_VERSION = "p2.3"  # p2.3: lab journal (p2.2 satchel-ladder; p2.1 auto-claim; p2.0 satchel)
 
 _ACTION_CLOSING = "Choose your action now. Reply with exactly one JSON object."
 _REFLECTION_CLOSING = (
@@ -94,6 +94,9 @@ def render_system(persona: PersonaCard) -> str:
         "Experiment in small steps and read what each combination leaves behind.\n"
         "The five base pairs run out fast: higher commissions come from combining\n"
         "your satchel compounds with bases and with each other.\n"
+        "Your lab journal below records every pair you have ever tried and what it\n"
+        "gave: repeating a journal entry can never teach you anything new — spend\n"
+        "experiments only on pairs the journal does not contain.\n"
         "Speak with those beside you — knowledge shared compounds.\n"
         "Write notes on what you learn; notes are the only memory that survives the day."
     )
@@ -144,6 +147,20 @@ def _outcomes_block(view: PerceptionView) -> str:
     return "\n".join(lines)
 
 
+def _journal_block(view: PerceptionView) -> str:
+    """Successes one line each; slag pairs grouped on one line — compact,
+    cumulative, and rendered in first-tried order (slag order included)."""
+    lines = ["YOUR LAB JOURNAL (every pair you have tried; do not repeat these)"]
+    if not view.journal:
+        lines.append("(nothing tried yet)")
+        return "\n".join(lines)
+    slag_pairs = [f"{a}+{b}" for a, b, product in view.journal if product == "slag"]
+    lines.extend(f"{a} + {b} -> {product}" for a, b, product in view.journal if product != "slag")
+    if slag_pairs:
+        lines.append("Slag (dead ends, never retry): " + ", ".join(slag_pairs))
+    return "\n".join(lines)
+
+
 def _satchel_block(view: PerceptionView) -> str:
     lines = ["YOUR SATCHEL (everything you have made; usable as ingredients)"]
     if view.satchel:
@@ -187,6 +204,7 @@ def _assemble(header: str, view: PerceptionView, closing: str) -> str:
         _reflection_block(view),
         _outcomes_block(view),
         _satchel_block(view),
+        _journal_block(view),
         _tasks_block(view),
         closing,
     ]
@@ -226,11 +244,13 @@ def enforce_budget(view: PerceptionView, budget_chars: int) -> PerceptionView:
     """Shrink *view* until ``render_user(view)`` fits in *budget_chars*.
 
     Drop order (locked, tested): oldest heard first, then oldest notes, then
-    oldest outcomes — one item at a time, re-rendering after each drop (all
-    three lists are ordered oldest-relevant-first at index 0 for dropping:
-    heard is most-recent-last; notes and outcomes are oldest-first).
-    Deterministic. When nothing is left to drop and the floor view still
-    exceeds the budget, that is a config/render bug: LMK_ASSERT fires.
+    oldest outcomes, then — last resort, the journal is the anti-retread
+    memory — oldest journal entries; one item at a time, re-rendering after
+    each drop (all four lists are ordered oldest-relevant-first at index 0
+    for dropping: heard is most-recent-last; notes, outcomes, and journal
+    are oldest-first). Deterministic. When nothing is left to drop and the
+    floor view still exceeds the budget, that is a config/render bug:
+    LMK_ASSERT fires.
     """
     current = view
     while len(render_user(current)) > budget_chars:
@@ -240,6 +260,8 @@ def enforce_budget(view: PerceptionView, budget_chars: int) -> PerceptionView:
             current = current.model_copy(update={"notes": list(current.notes[1:])})
         elif current.outcomes:
             current = current.model_copy(update={"outcomes": list(current.outcomes[1:])})
+        elif current.journal:
+            current = current.model_copy(update={"journal": list(current.journal[1:])})
         else:
             LMK_ASSERT(
                 False,

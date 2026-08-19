@@ -61,6 +61,12 @@ VIEW = PerceptionView(
         "A faint shimmer: the ash took the water.",
     ],
     satchel=["cinnabar-ash", "quenched-iron"],
+    journal=[
+        ("fire", "metal", "cinnabar-ash"),
+        ("earth", "earth", "slag"),
+        ("cinnabar-ash", "water", "quenched-iron"),
+        ("fire", "water", "slag"),
+    ],
     tasks=[
         TaskStub(task_id="w1-01", tier=1, title='produce "cinnabar-ash"'),
         TaskStub(task_id="w2-03", tier=2, title='produce "quenched-iron"'),
@@ -108,6 +114,9 @@ Observe before you spend; the task board lists what the valley pays for.
 Experiment in small steps and read what each combination leaves behind.
 The five base pairs run out fast: higher commissions come from combining
 your satchel compounds with bases and with each other.
+Your lab journal below records every pair you have ever tried and what it
+gave: repeating a journal entry can never teach you anything new — spend
+experiments only on pairs the journal does not contain.
 Speak with those beside you — knowledge shared compounds.
 Write notes on what you learn; notes are the only memory that survives the day."""
 
@@ -138,6 +147,11 @@ YOUR SATCHEL (everything you have made; usable as ingredients)
 - cinnabar-ash
 - quenched-iron
 
+YOUR LAB JOURNAL (every pair you have tried; do not repeat these)
+fire + metal -> cinnabar-ash
+cinnabar-ash + water -> quenched-iron
+Slag (dead ends, never retry): earth+earth, fire+water
+
 TASK BOARD
 Base ingredients always at hand: wood, fire, earth, metal, water.
 Products you make join your satchel and stay usable as ingredients forever.
@@ -161,14 +175,14 @@ GOLDEN_REFLECTION = (
 )
 
 # sha256 of the utf-8 canonical envelope over (GOLDEN_SYSTEM, GOLDEN_USER).
-GOLDEN_PROMPT_SHA = "3535d93f2ef227178a0f5e535981cf01be3502a3d8271fa7252561ff86c0810e"
+GOLDEN_PROMPT_SHA = "129370a4eb1fcdb79efdaddf4b835ae2876932ad13d71a443dc3394f0293a7f2"
 
 
 # ------------------------------------------------------------------- goldens
 
 
 def test_template_version_pinned() -> None:
-    assert TEMPLATE_VERSION == "p2.2"
+    assert TEMPLATE_VERSION == "p2.3"
 
 
 def test_golden_system() -> None:

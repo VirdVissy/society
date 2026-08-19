@@ -420,7 +420,7 @@ def test_outcomes_keep_last_three_oldest_first() -> None:
                 1 + i,
                 EventKind.TASK_ATTEMPT,
                 actor="a1",
-                payload={"message": f"m{i}", "step_products": []},
+                payload={"message": f"m{i}", "steps": [], "step_products": []},
             )
         )
     ws = _fold(*events)
@@ -471,7 +471,12 @@ def test_queries_return_fresh_lists_not_views() -> None:
         _spawn(1, "a2", "Brook"),
         _converse(2, "a1", "hi"),
         _note(3, "a2", "n"),
-        _ev(4, EventKind.TASK_ATTEMPT, actor="a2", payload={"message": "m", "step_products": []}),
+        _ev(
+            4,
+            EventKind.TASK_ATTEMPT,
+            actor="a2",
+            payload={"message": "m", "steps": [], "step_products": []},
+        ),
     )
     ws.heard("a2", 0).clear()
     ws.notes("a2").clear()
@@ -498,6 +503,82 @@ def test_queries_on_unknown_agent_assert() -> None:
             query()
 
 
+class TestJournal:
+    """Lab-journal rule (2026-08-19): every executed step -> one journal
+    entry, deduped by unordered pair, ingredients alphabetical, first-tried
+    order, cumulative for life."""
+
+    def test_journal_accumulates_normalized_deduped_first_tried(self) -> None:
+        fold = _fold(
+            _spawn(0, "a1"),
+            _ev(
+                1,
+                EventKind.TASK_ATTEMPT,
+                actor="a1",
+                payload={
+                    "message": "m",
+                    "steps": [["water", "metal"], ["water", "water"], ["metal", "water"]],
+                    "step_products": ["iron-ash", "slag", "iron-ash"],
+                },
+            ),
+            _ev(
+                2,
+                EventKind.TASK_ATTEMPT,
+                actor="a1",
+                payload={
+                    "message": "m",
+                    "steps": [["water", "wood"], ["metal", "water"]],
+                    "step_products": ["pale-dew", "iron-ash"],
+                },
+            ),
+        )
+        # metal+water recorded once (both orders normalize to one pair);
+        # slag entries are kept — dead ends are the whole point.
+        assert fold.journal("a1") == [
+            ("metal", "water", "iron-ash"),
+            ("water", "water", "slag"),
+            ("water", "wood", "pale-dew"),
+        ]
+
+    def test_journal_ignores_unexecuted_steps(self) -> None:
+        # An unavailable ingredient stops the attempt: step_products covers
+        # only the executed prefix; the stopped tail must not be journaled.
+        fold = _fold(
+            _spawn(0, "a1"),
+            _ev(
+                1,
+                EventKind.TASK_ATTEMPT,
+                actor="a1",
+                payload={
+                    "message": "m",
+                    "steps": [["wood", "fire"], ["ghost-herb", "fire"]],
+                    "step_products": ["ember-root"],
+                },
+            ),
+        )
+        assert fold.journal("a1") == [("fire", "wood", "ember-root")]
+
+    def test_journal_is_per_agent_and_fresh_copies(self) -> None:
+        fold = _fold(
+            _spawn(0, "a1"),
+            _spawn(1, "a2"),
+            _ev(
+                2,
+                EventKind.TASK_ATTEMPT,
+                actor="a1",
+                payload={
+                    "message": "m",
+                    "steps": [["metal", "water"]],
+                    "step_products": ["iron-ash"],
+                },
+            ),
+        )
+        assert fold.journal("a2") == []
+        first = fold.journal("a1")
+        first.append(("tampered", "x", "y"))
+        assert fold.journal("a1") == [("metal", "water", "iron-ash")]
+
+
 class TestSatchel:
     def test_satchel_accumulates_non_slag_first_acquired_deduped(self) -> None:
         fold = _fold(
@@ -506,13 +587,21 @@ class TestSatchel:
                 1,
                 EventKind.TASK_ATTEMPT,
                 actor="a1",
-                payload={"message": "m", "step_products": ["iron-ash", "slag", "iron-ash"]},
+                payload={
+                    "message": "m",
+                    "steps": [["water", "metal"], ["water", "water"], ["metal", "water"]],
+                    "step_products": ["iron-ash", "slag", "iron-ash"],
+                },
             ),
             _ev(
                 2,
                 EventKind.TASK_ATTEMPT,
                 actor="a1",
-                payload={"message": "m", "step_products": ["pale-dew", "iron-ash"]},
+                payload={
+                    "message": "m",
+                    "steps": [["water", "wood"], ["metal", "water"]],
+                    "step_products": ["pale-dew", "iron-ash"],
+                },
             ),
         )
         assert fold.satchel("a1") == ["iron-ash", "pale-dew"]
@@ -525,7 +614,11 @@ class TestSatchel:
                 2,
                 EventKind.TASK_ATTEMPT,
                 actor="a1",
-                payload={"message": "m", "step_products": ["iron-ash"]},
+                payload={
+                    "message": "m",
+                    "steps": [["metal", "water"]],
+                    "step_products": ["iron-ash"],
+                },
             ),
         )
         assert fold.satchel("a2") == []

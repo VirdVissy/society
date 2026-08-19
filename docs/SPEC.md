@@ -307,6 +307,22 @@ the build waves:
   Dusk reflections wave identically (lanes never observe each other). Deep
   replay always re-executes at width 1; `CachedBackend` keys recorded
   calls by seed, so generation order can never matter.
+- **The lab-journal world rule** (ratified 2026-08-19 from acceptance-run-1
+  evidence): every EXECUTED experiment step joins the actor's cumulative
+  journal — `(a, b, product)`, deduped by unordered pair, ingredients
+  alphabetical within an entry, first-tried order, never removed. The
+  world fold derives it purely from TASK_ATTEMPT `steps`×`step_products`
+  (zip over the executed prefix; a pair's product is a pure function of
+  the hidden recipe book, so dedupe can never hide a contradiction).
+  Perception gains a YOUR LAB JOURNAL block (successes one line each,
+  slag pairs grouped as one dead-ends line); template p2.3 adds the
+  matching protocol line. Budget drop order extends to: heard → notes →
+  outcomes → journal (last resort). Evidence: 30 observed days where
+  agents made their last new discovery on day 13 and then filed 700+
+  attempts of pure retreading — 11 distinct products ever, while notes
+  never functioned as a systematic record of tried pairs. Same philosophy
+  as the satchel: give the world the memory agents already assume they
+  have, rather than nagging them to emulate it.
 
 ## 9. Deviations from PLAN.md §3 (recorded, deliberate)
 

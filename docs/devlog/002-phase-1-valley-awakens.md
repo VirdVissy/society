@@ -146,6 +146,30 @@ wall. Both deep replays byte-identical on real concurrent cloud traffic.
 down from ~5.5–6 h. Simultaneity did not hurt discovery; if anything the
 denser rounds compound satchels faster.
 
+### Pivot 7 — the lab journal (acceptance run 1 fails the gate honestly)
+
+The first full 30-day acceptance run (Haiku 4.5, waves, ~28 min wall
+across a credit-outage resume) passed every engine criterion — all 8
+alive, byte-identical deep replay of 7,194 events, zero unhandled engine
+exceptions — and FAILED the pre-registered discovery gate: 11 distinct
+(8 tier-1, 2 tier-2, 1 tier-3) against ≥15. The tier-3 came on day 2;
+the last new compound came on day 13; days 14–29 were a plateau of
+frantic retreading — 268 attempts in the final five days alone, every
+one a re-run of a known recipe or a known slag. The agents only ever
+produced 11 distinct compounds in 1,301 attempts, though ~78 base/tier-1
+pairs exist and their attempt volume could have swept that space many
+times over. Nothing in the world remembered which pairs were already
+spent: notes are freeform and nobody uses them as a lab ledger.
+
+The gate does not move; the world does (the satchel philosophy again —
+match the memory agents already assume they have): the **lab journal**.
+Every executed step folds into a cumulative per-agent
+pair→product record, rendered in perception as successes plus a grouped
+dead-ends line, deduped by unordered pair, kept for life. Template p2.3
+adds one protocol line: repeating a journal entry can never teach you
+anything new. Golden cost: +6% input tokens on the 4-day scripted run.
+A fresh canary pair gates the second acceptance attempt.
+
 ## Measured numbers
 
 - **Local baseline** (mlx, Qwen3-4B-4bit, M3 Pro, template p1.0): 2-day

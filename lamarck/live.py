@@ -667,6 +667,7 @@ class _LiveEngine:
             notes=self.world.notes(actor),
             reflection=self.world.reflection(actor),
             outcomes=self.world.outcomes(actor),
+            journal=self.world.journal(actor),
             satchel=self.world.satchel(actor),
             tasks=list(self.board),
             materials=list(self.cfg.economy.materials),

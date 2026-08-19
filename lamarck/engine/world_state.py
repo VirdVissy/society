@@ -49,6 +49,8 @@ is freshly built in a deterministic order):
   - ``notes(agent)``          last 5 note texts, oldest first.
   - ``reflection(agent)``     latest reflection text, ``""`` before the first.
   - ``outcomes(agent)``       last 3 task-attempt messages, oldest first.
+  - ``journal(agent)``        every pair ever tried -> product, first-tried
+                              order, deduped (lab-journal rule, 2026-08-19).
   - ``can_trade(actor, target)``  advisory pre-emission check for the runner
                               (target exists, is alive, is co-located, is not
                               the actor), returning ``(ok, reason)``. The
@@ -105,6 +107,8 @@ class WorldStateFold:
         self._outcomes: dict[str, list[str]] = {}
         self._satchel: dict[str, list[str]] = {}
         self._satchel_seen: dict[str, set[str]] = {}  # membership only; never iterated
+        self._journal: dict[str, list[tuple[str, str, str]]] = {}
+        self._journal_seen: dict[str, set[tuple[str, str]]] = {}  # membership only
 
     # ----------------------------------------------------------------- fold
 
@@ -138,6 +142,28 @@ class WorldStateFold:
                 if isinstance(product, str) and product != "slag" and product not in seen:
                     seen.add(product)
                     satchel.append(product)
+            # Lab-journal rule (2026-08-19): every EXECUTED step is recorded
+            # as (ingredient, ingredient, product) — first-tried order,
+            # deduped by unordered pair, never removed. step_products aligns
+            # with the executed prefix of steps (an unavailable ingredient
+            # stops the attempt), so zip() pairs them exactly. A pair's
+            # product is a pure function of the hidden recipe book, so a
+            # dedupe can never hide a contradicting result.
+            steps = ev.payload.get("steps")
+            LMK_ASSERT(
+                isinstance(steps, list) and len(products) <= len(steps),
+                "TASK_ATTEMPT payload needs a steps list covering step_products",
+                seq=ev.seq,
+            )
+            assert isinstance(steps, list)  # narrow for mypy; guaranteed above
+            journal = self._journal[ev.actor]
+            jseen = self._journal_seen[ev.actor]
+            for step, product in zip(steps, products, strict=False):
+                a, b = str(step[0]), str(step[1])
+                key = (a, b) if a <= b else (b, a)
+                if key not in jseen:
+                    jseen.add(key)
+                    journal.append((key[0], key[1], str(product)))
         # Every other kind (run/day/phase markers, LLM_CALL, LEDGER_ADJUST)
         # has no world-state effect.
 
@@ -188,6 +214,14 @@ class WorldStateFold:
         first."""
         self._assert_registered(agent)
         return list(self._outcomes[agent][-OUTCOMES_MAX:])
+
+    def journal(self, agent: str) -> list[tuple[str, str, str]]:
+        """The agent's cumulative lab journal: every ingredient pair they
+        have ever combined, with its product — first-tried order, deduped
+        by unordered pair (ingredients alphabetical within an entry). The
+        durable memory that makes retreading visible (2026-08-19)."""
+        self._assert_registered(agent)
+        return list(self._journal[agent])
 
     def satchel(self, agent: str) -> list[str]:
         """Every non-slag compound ``agent`` has ever produced —
@@ -251,6 +285,8 @@ class WorldStateFold:
         self._outcomes[agent_id] = []
         self._satchel[agent_id] = []
         self._satchel_seen[agent_id] = set()
+        self._journal[agent_id] = []
+        self._journal_seen[agent_id] = set()
 
     def _apply_action(self, ev: EventRecord) -> None:
         if ev.payload.get("degraded"):
