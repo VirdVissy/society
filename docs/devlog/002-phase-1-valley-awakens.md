@@ -1,7 +1,5 @@
 # devlog 002 — Phase 1: The Valley Awakens
 
-*Status: DRAFT — measured numbers land at integration. Nothing here is pinned
-until this line is removed.*
 
 ## What Phase 1 is
 
@@ -190,10 +188,23 @@ A fresh canary pair gates the second acceptance attempt.
   against the 30k daily allowance — natural lifespan ≈ 370 sim-days at
   Phase-1 activity; lifespan pressure will need tuning when Phase 2 makes
   death matter. *(initial, one smoke's evidence)*
-- **Acceptance run (30 days × 8, Haiku 4.5): (TO FILL on completion)** —
-  wall, events, db size, distinct discoveries (incl. tier-3+), token
-  totals and cost, degraded/malformed rates, deep-replay verdict.
-- Suite: 483 tests + 1 local-only mlx skip, ~8 s. CI matrix: pending the
+- **Acceptance run (30 days × 8, Haiku 4.5, template p2.3, waves ×8;
+  run `aea04d1a8e6f`, the SECOND attempt — attempt 1 failed the gate and
+  produced pivot 7)**: **PASSED every criterion.** 7,392 events (62 MB
+  db); **24 distinct verified discoveries** — all 8 tier-1, all 8 tier-2,
+  6 tier-3, 1 tier-4, and 1 tier-5, the deepest compound in the universe;
+  first-in-world discoveries still landing on day 27. 980 attempts, 129
+  paid claims, 272 degraded slots, 1,803 billed retries (1,531
+  recovered). Tokens 17,090,957 in / 659,701 out ≈ **$20.4**; wall ≈ 35
+  min across two segments (an external stop at day 8, resumed with
+  `lamarck resume` — resume's second production save). Deep replay
+  re-executed all 7,392 events byte-identically (head
+  `7391/edf85fbc447f`). Per-agent retread rate 61% over 30 days (93% in
+  attempt 1; the residual is frontier saturation, not amnesia).
+- The two 30-day attempts are the lab journal's controlled experiment:
+  same model, same config family, same budget — 11 distinct and a day-13
+  flatline without it; 24 distinct and a live frontier to day 27 with it.
+- Suite: 506 tests + 1 local-only mlx skip, ~8 s. CI matrix: pending the
   repo's first push (unchanged since Phase 0).
 
 ## Deviations from PLAN (ratified this phase)
