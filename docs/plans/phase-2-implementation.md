@@ -56,11 +56,24 @@ end-to-end `blame` working.
    computable (edit distance over canonical step lists) and verification
    trivial (the student's own passing attempt, which the auto-claim engine
    already detects).
-2. **Lifespan pressure must be configured in.** Phase-1 calibration: ~3,200
-   qi/agent/day median against `qi_max = 1,200,000` ⇒ natural lifespan ≈ 370
-   sim-days. Three generations in ≤ 40 sim-days needs `qi_max` ≈ 40,000–60,000
-   *(initial; canary-tuned)* so a life is ~12–15 days. Config-only change, but
-   it invalidates every Phase-1 behavioral intuition — hence its own canary.
+2. **Lifespan pressure must be configured in — with the corrected
+   calibration (2026-09-06 status review).** Devlog 002's original figure
+   (~3,200 qi/agent/day ⇒ ≈370-day life) was wrong: no statistic in any run
+   reproduces it. Measured total qi per agent-day (thinking + action
+   surcharges; both drain lifespan qi): acceptance run `aea04d1a8e6f`
+   median **21,721** (min 12,832, max 27,161; 96% of it thinking), cloud
+   smoke 15,532, canary-10 arm 2 17,368. So `qi_max = 1,200,000` is a
+   ≈55-day life, and the 30,000 daily allowance — median spend is 72% of
+   it — is the binding daily constraint. Death has never fired with a real
+   model: Phase 1's config makes it unreachable (30 × 30,000 < 1.2M).
+   Three-plus generations inside a ≤30-day run needs a life of ≈10
+   sim-days: `qi_max` ≈ **200,000–250,000** *(initial; canary-tuned)* ⇒
+   expected life 9–12 days at median spend, floor ≈7 days at full
+   allowance, ceiling ≈19 days for the thriftiest agent. The originally
+   proposed 40,000–60,000 would give 2–3-day lives — exactly the "deaths at
+   day 2–3" failure signal the risk table names. Config-only change, but it
+   invalidates every Phase-1 behavioral intuition — hence its own canary.
+
 3. **Possession is already proven per-agent.** The once-per-cultivator
    auto-claim ledger IS the skill registry: agent X "has" technique T iff X
    has a paid claim for T's target. Teaching grants nothing by fiat; it ends
@@ -71,6 +84,26 @@ end-to-end `blame` working.
    lands next round). The teaching protocol below is therefore asynchronous by
    design — no same-round call-and-response is ever required.
 
+### Pre-Stage-A findings (2026-09-06 status review)
+
+- A `[lineage]` TOML section is silently ignored today and does not change
+  `live_config_sha`/run_id (`LiveWorldConfig` has no such field; pydantic
+  drops unknown sections). Stage A must add it as a typed field before any
+  config-only lineage experiment, or two different worlds share a run id.
+- The persona pool is exactly 8 cards for 8 founders and the loader rejects
+  duplicate display names, so B2's successor spawn needs both more cards
+  and a lineage-safe naming scheme ("Yan Hua II") that passes that check.
+- "Retread rate" is a hand-computed devlog number, not a metric in
+  `lamarck/analysis/`; the Stage-E bar depends on it, so C2 must add it
+  (baseline: canary10-1/-2, 12 and 16 distinct over 4 days).
+- The paid config's fingerprint is now pinned
+  (`tests/test_config_live.py::VALLEY_CLOUD_LIVE_CONFIG_SHA`); the Stage-A
+  retune re-pins it deliberately.
+- `__version__` is hashed into every RUN_STARTED and deep replay re-emits it
+  from the running code, so bumping the version string breaks byte-identical
+  replay of every existing log. Stage A/D should decide whether replay reads
+  `engine_version` from the log (preferred) before any bump.
+
 ## 3. Stage overview
 
 | Stage | Name | Output | Paid? |
@@ -79,7 +112,7 @@ end-to-end `blame` working.
 | B | Build wave 1 (3 parallel subagents) | mind-git store; mortality+succession; sects+literacy | no |
 | C | Build wave 2 (2 parallel subagents) | teaching protocol in the runner; CLIs + metrics suite | no |
 | D | Integration | goldens, replay/resume extensions, docs, devlog 003 draft | no |
-| E | Canary ladder | mortality canary → generational canary (n=2 each) | ~$6 |
+| E | Canary ladder | mortality canary → generational canary (n=2 each) | ~$25 |
 | F | E2 ablation + acceptance | paired-seed oral/archive runs + 30-day acceptance | ~$45–65 |
 | G | Close-out | devlog 003 final numbers, `v0.3.0` tag | no |
 
@@ -271,14 +304,19 @@ end-to-end across two generations — the acceptance criterion, proven for $0.
 
 *Bar pre-registered here; n=2 arms per rung; every arm deep-replayed.*
 
-1. **Mortality canary** (2 arms × 6 days, retuned `qi_max`, no E2 split):
+1. **Mortality canary** (2 arms × 6 days, canary-only `qi_max` ≈ 90,000 so
+   a life is ≈4 days at measured spend — this rung exercises death +
+   succession *mechanics*, not the production lifespan; no E2 split):
    bar = ≥1 natural death per arm; succession fires; the successor takes ≥1
    action; zero unhandled exceptions; deep replay byte-identical. Tunes:
-   `qi_max`, deathbed window.
-2. **Generational canary** (2 arms × 10 days): bar = ≥2 generations per arm;
-   ≥1 `taught` edge per arm (a technique provably crosses a death); `blame`
-   resolves it end-to-end on the real run; retread rate not regressed vs
-   canary10 (journal still working under mortality pressure).
+   deathbed window. *(Amended 2026-09-06: at the corrected calibration a
+   6-day arm at the production `qi_max` cannot contain a natural death.)*
+2. **Generational canary** (2 arms × 12 days, production `qi_max`
+   200,000–250,000): bar = ≥2 generations per arm; ≥1 `taught` edge per
+   arm (a technique provably crosses a death); `blame` resolves it
+   end-to-end on the real run; retread rate (now a C2 metric) not
+   regressed vs canary10 (journal still working under mortality pressure).
+   *(Amended 2026-09-06: 10 days was marginal for 9–12-day lives.)*
 
 Any rung failing twice ⇒ stop, diagnose from the log, world-not-prompt fix,
 new pivot in devlog 003, re-canary. (Phase-1 history says expect at least
@@ -321,6 +359,6 @@ audited here, before weights depend on it).
 
 - Build (Stages A–D): $0 API, the bulk of the calendar time; 5 subagent
   briefs, 2 waves, ~150 new tests.
-- Paid (Stages E–F): ~$50–70 total, ~6–10 runs, each behind an explicit go;
+- Paid (Stages E–F): ~$70–90 total, ~6–10 runs, each behind an explicit go;
   wall-clock per 30-day run ≈ 30–40 min at current wave throughput.
 - Everything pinned as it lands; devlog 003 is written alongside, not after.

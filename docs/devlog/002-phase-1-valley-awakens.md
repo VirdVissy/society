@@ -135,7 +135,7 @@ keys recorded calls by RNG seed instead of arrival order, so deep replay
 can never depend on generation order again.
 
 Canary-9 (the revalidation pair under wave semantics, Haiku 4.5, 4 days,
-8-wide, ~$2.6) passed the pre-registered bar in both arms — and then
+8-wide, ~$4.2 for the pair — ≈$2.1 per arm) passed the pre-registered bar in both arms — and then
 some. Arm 1: 16 distinct (all 8 tier-1, 7/8 tier-2, and **wx-t3-1, the
 valley's first tier-3 ever**, day 2, built from an earned tier-2
 satchel), 6.2 min wall. Arm 2: 11 distinct (8 tier-1, 3 tier-2), 5.1 min
@@ -184,10 +184,17 @@ A fresh canary pair gates the second acceptance attempt.
   commission id); day 1 = 36 attempts / **10 verified** across
   diversifying task ids — agents connected "the crucible yields X" to the
   commission that pays for X without any prompt change.
-- Qi calibration (cloud smoke): ~3,200 qi/agent/day median thinking cost
-  against the 30k daily allowance — natural lifespan ≈ 370 sim-days at
-  Phase-1 activity; lifespan pressure will need tuning when Phase 2 makes
-  death matter. *(initial, one smoke's evidence)*
+- Qi calibration — **corrected 2026-09-06** (the original bullet claimed
+  ~3,200 qi/agent/day and a ≈370-day life; no statistic in any run
+  reproduces that figure — see Errata). Measured total qi per agent-day
+  from the event logs (thinking + action surcharges; both drain lifespan
+  qi): acceptance run median 21,721 (mean 21,375; min 12,832; max 27,161;
+  96% thinking); cloud smoke 15,532; canary-10 arm 2 17,368. Against
+  `qi_max = 1,200,000` that is a natural lifespan ≈ 55 sim-days, and the
+  30k daily allowance — median spend is 72% of it — is the binding daily
+  constraint. Death is unreachable in this config (30 × 30,000 < 1.2M), so
+  Phase 1 never exercised the death path with a real model. Phase 2's
+  lifespan retune starts from these numbers (plan §2.2).
 - **Acceptance run (30 days × 8, Haiku 4.5, template p2.3, waves ×8;
   run `aea04d1a8e6f`, the SECOND attempt — attempt 1 failed the gate and
   produced pivot 7)**: **PASSED every criterion.** 7,392 events (62 MB
@@ -204,8 +211,13 @@ A fresh canary pair gates the second acceptance attempt.
 - The two 30-day attempts are the lab journal's controlled experiment:
   same model, same config family, same budget — 11 distinct and a day-13
   flatline without it; 24 distinct and a live frontier to day 27 with it.
-- Suite: 506 tests + 1 local-only mlx skip, ~8 s. CI matrix: pending the
-  repo's first push (unchanged since Phase 0).
+- Suite: 506 passed + 1 skipped, ~7 s. Locally the skip is
+  `test_make_backend_mlx_requires_mlx_lm` (mlx-lm IS installed, and the mlx
+  smoke test runs against the cached Qwen3-4B); on CI without the extras
+  the roles swap. CI: the remote has existed since 2026-07-23 (pushes
+  2026-07-23, 08-05, 09-04); the ubuntu-latest leg was red from the
+  2026-08-05 push until the timing-budget fix of 2026-09-06 (macOS green
+  throughout) — see Errata.
 
 ## Deviations from PLAN (ratified this phase)
 
@@ -232,3 +244,42 @@ had — an overnight society run you can replay byte-for-byte.
 Mind-git provenance (belief commits at dusk), the teaching protocol with
 fidelity, death/succession, sects v1, literacy toggle, metrics suite v1,
 and E2 (oral vs. archive).
+
+## Errata (2026-09-06, from the post-close status review)
+
+Corrections made in place above are marked; the record they replace is
+kept here so the history stays honest.
+
+- **Qi calibration.** The "~3,200 qi/agent/day ⇒ ≈370-day life" bullet was
+  wrong. The measured medians are 15.5k (cloud smoke) to 21.7k (acceptance
+  run) per agent-day; lifespan at `qi_max` 1.2M is ≈55 days. The Phase-2
+  plan's proposed `qi_max` of 40–60k inherited the error and would have
+  produced 2–3-day lives; plan §2.2 is amended.
+- **Canary-9 cost.** "~$2.6" was one arm; the pair cost ≈$4.2 at the same
+  $1/$5 per Mtok pricing used elsewhere in this devlog. Total logged API
+  spend for Phase 1 (21,781 LLM calls across 18 cloud runs) is ≈$97.6, a
+  lower bound — the first acceptance attempt left no run directory.
+- **CI.** "CI matrix: pending the repo's first push" was false when
+  written: the repo had been pushed on 2026-07-23 and 2026-08-05, and the
+  ubuntu-latest Tests step had been failing since the latter (macOS green).
+  Cause: the two wall-clock budgets (`test_perf` 5 s, eventstore 2 s) on
+  shared runners ~2.5× slower than the M3 Pro; widened 3× under `CI` only.
+- **Skip identity.** "1 local-only mlx skip" was inverted, see the
+  corrected suite bullet.
+- **The unrecorded third acceptance attempt.** `runs/acceptance30-try2`
+  (template p1.3, launched 2026-07-27 17:22, halted after 24 sim-days,
+  **0 verified in 160 attempts**, 3,070 calls ≈ $12.8) sits between the
+  "second attempt" and the "final acceptance run" above. Postmortem
+  (commit `e381e9f`): early mis-citations → zero income → all 8 agents at
+  0 stones by ~day 3 → 771 stone-poverty degrades → no experiments →
+  absorbing-state collapse; attempt 2 had survived only on the farming
+  income the anti-farming rule correctly removed. Fixes: tier-1 materials
+  cost 0 in both valley configs (the learning tier can never poverty-lock)
+  and template p1.4 states the citation rule outright. Both are ratified
+  in SPEC §9a as of this erratum.
+- **Attempt numbering.** The passing run was the sixth launch under a
+  30-day config and the second to complete 30 days; "final acceptance
+  run" (pivot 4) ran 23 sim-days (0–22), not "~20".
+- **Wall time.** The passing run's segments span 11.8 + 26.9 = 38.7 min of
+  wall-clock; the log's "wall ms 1611572" covers only the resumed segment
+  (`resume_live` starts its own timer).

@@ -9,7 +9,8 @@ consolidate experience into their own LoRA weights during sleep, and reproduce b
 adapter merging. Every belief and technique carries full provenance — the society is
 version-controlled like a codebase.
 
-Plan drafted 2026-07-23. Status: pre-Phase-0. This document is the project
+Plan drafted 2026-07-23. Status: Phase 1 closed (`v0.2.0`, 2026-08-21); Phase 2 in
+progress — ratified deviations live in `docs/SPEC.md` §9/§9a and the devlogs. This document is the project
 constitution; schemas defined here get extracted into `docs/SPEC.md` and locked in
 Phase 0. Numbers marked *(initial)* are calibration targets, not measurements — the
 honesty bar from loom/sim-ex applies: **measured claims only, negative results get

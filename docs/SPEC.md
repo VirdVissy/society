@@ -195,8 +195,9 @@ the build waves:
   `-(ceil(in/4) + out)`; `stones_delta` must be zero. `TASK_ATTEMPT` and
   `REFLECTION` are zero-delta, living-actor events.
 - **Prompt envelope**: the string passed to any backend is canonical JSON
-  `{"system", "template", "user"}` with `TEMPLATE_VERSION = "p1.0"` (any
-  wording change bumps it; goldens catch unversioned drift).
+  `{"system", "template", "user"}` with `TEMPLATE_VERSION` (p1.0 at first
+  pin, `"p2.3"` at v0.2.0 — lineage below; any wording change bumps it;
+  goldens catch unversioned drift).
   `prompt_sha256 = sha256(envelope)`. Full prompt texts live in the unhashed
   `llm_texts` side table (`lamarck/eventstore/texts.py`): dropping that
   table cannot change any fingerprint, and writes must land outside
@@ -211,19 +212,31 @@ the build waves:
 - **Parser**: failure-reason catalog and the first-balanced-brace rule are
   locked by tests; `MAX_ACTION_PARSE_RETRIES = 1`, second failure forfeits
   as `{type: "rest", degraded: true, reason: "malformed"}`.
+- **Trade poverty takes the retry path** (build-wave friction, ratified):
+  a TRADE whose `stones` exceed the actor's balance is a semantic
+  validation failure ("you have only N spirit stones") and gets the one
+  billed retry — never the degrade path — because a committed
+  over-balance trade would be a ledger violation and the stub funnel
+  prices only allowance and materials.
 - **Wuxing**: 34 compounds over tiers {1:8, 2:8, 3:7, 4:6, 5:5}; one recipe
   per compound (unordered pair, unique across the universe, ≥ one
   ingredient of tier t−1); non-recipe pairs yield `slag`; `slag` is
   absorbing. Submissions cap at 12 steps; generation enforces
   producibility (a recipe's closure must fit `MAX_STEPS − (tiers − tier)`),
   so every commission is winnable — `oracle_audit`/`lamarck audit` proves
-  it before a run. `attempt` is rng-free; `verified` = target appears in
-  `step_products` (mid-procedure counts). No public surface (manifest,
+  it before a run. `attempt` is rng-free; a commission is fulfilled when its target
+  appears in `step_products` (mid-procedure counts) — since p2.1 the
+  runner derives this as `claims` (auto-claim, below) and TASK_ATTEMPT
+  carries no `verified` key. No public surface (manifest,
   tasks, titles, outcomes) may reveal a recipe or name an unproduced
   compound other than the task target.
 - **Config fingerprints**: the Phase-0 `config_sha` of `configs/world.toml`
   is regression-pinned (`24cbbf0e…`); live runs fingerprint the extended
-  model via `live_config_sha` (valley golden `3723764d…`).
+  model via `live_config_sha` (valley golden `f4585137…`, re-pinned
+  2026-07-27 for free tier-1 materials and 2026-08-18 when
+  `wave_concurrency` joined the fingerprint; the paid config
+  `configs/valley-cloud.toml` differs only by `wave_concurrency = 8` and
+  pins `6327b67a…`, the sha recorded in the Phase-1 acceptance run).
 - **Once-per-cultivator bounties** (ratified from acceptance-run evidence):
   the board pays a commission's bounty at most once per agent — repeat
   verifications by the same agent commit a verified TASK_ATTEMPT but no
@@ -244,7 +257,17 @@ the build waves:
   map comes from public board titles. Runner and shallow-replay verifier
   share one helper, so they cannot diverge. Template p1.3 adds a matching
   reflection nudge ("name any commission you now know how to fulfill but
-  have not yet claimed").
+  have not yet claimed"). *Superseded 2026-08-05 by auto-claim (below):
+  the suffix is now "The board pays N stones for X (wx-tN-i)."; the p1.3
+  nudge wording survives verbatim in p2.3 although claiming is automatic
+  (cleanup candidate for p3.0).*
+- **Free tier-1 materials + citation rules** (template p1.4, ratified
+  2026-07-27 from acceptance attempt 3 — 24 sim-days, zero verified,
+  all 8 agents stone-broke by day 3): `economy.materials[0] = 0` in both
+  valley configs, so the learning tier can never poverty-lock while higher
+  tiers stay gated; p1.4 states the citation rule outright and marks the
+  example task id as a placeholder. Golden re-pins were config-driven
+  (run_id, valley `live_config_sha`); behavior pins unchanged.
 - **The satchel world rule** (ratified 2026-08-05 after two-model canary
   evidence): every non-slag step product an agent produces joins their
   satchel permanently (first-acquired order, deduped, never consumed — a
@@ -262,6 +285,29 @@ the build waves:
   (p1.5); every model tested holds the made-it-so-I-have-it intuition, so
   the world now matches it, and tier-2 collapses to tier-1 cognitive load
   while recipes stay undiscovered.
+- **Auto-claim** (template p2.1, ratified 2026-08-05 — commit `62d7111`;
+  in-code comments date it 2026-08-06): the board pays for compounds, not
+  paperwork. `experiment` takes ONLY `{steps}` (no `task_id`); the universe
+  gains stateless `craft()` (`attempt()` kept for audits/tests); the engine
+  derives `claims` — every produced compound naming a commission this
+  cultivator has not yet been paid for, in step-product order — via ONE
+  `_derive_claims` helper shared verbatim with the shallow-replay verifier.
+  TASK_ATTEMPT payload is `{steps, step_products, message, claims:
+  [{task_id, tier, first}]}`; each claim appends one net LEDGER_ADJUST
+  `{reason: "bounty", task_id, tier, first}` crediting
+  `bounties[t-1] × (live.first_discovery_multiplier if first-in-world else
+  1) − materials[t-1]` (audited net-positive). Consequently the experiment
+  ACTION carries `stones_delta = 0` — materials are paid on delivery, so
+  upfront stone-poverty is structurally dead — and `first_discovery_multiplier`
+  lives in the `[live]` section. Bounty adjusts must trail their attempt
+  back-to-back (verifier enforces). Evidence: six runs where the citation
+  step ("read 'X fulfills wx-tN-i', echo the id next call") was a per-call
+  reliability lottery that decided whole runs.
+- **The satchel-ladder line** (template p2.2, 2026-08-06, from the n=2
+  canary-7 split — arm 2 used its satchel in 15/114 attempts and found
+  tier-2; arm 1 in 2/100 and did not): one guidance line states that the
+  five base pairs run out fast and higher commissions come from combining
+  satchel compounds with bases and with each other. No mechanics change.
 - **Resume** (ratified from the day-12 529 death): `lamarck resume RUN_DIR`
   continues an interrupted live run from its last completed day. Day-batch
   transactions guarantee a clean boundary; resume verifies the chain,
@@ -323,6 +369,21 @@ the build waves:
   never functioned as a systematic record of tried pairs. Same philosophy
   as the satchel: give the world the memory agents already assume they
   have, rather than nagging them to emulate it.
+- **Template lineage** (every bump re-pins the mind and live goldens in
+  the same commit): p1.0 first pin (2026-07-24) → p1.1 exact-ingredient
+  protocol (2026-07-24) → p1.2 once-per-cultivator board rule (2026-07-24)
+  → p1.3 board notes + reflection nudge (2026-07-25) → p1.4 citation rules
+  + free tier-1 materials (2026-07-27) → p1.5 crucible-empties chaining
+  lesson (2026-08-05) → p2.0 satchel, lesson deleted (2026-08-05) → p2.1
+  auto-claim, citation paragraph dropped (2026-08-05) → p2.2 satchel-ladder
+  line (2026-08-06) → p2.3 lab-journal line (2026-08-19).
+- **Live report layout**: `lamarck.analysis.report.write_report` writes
+  `report.json` as `{run_id, mode, model_id, days, agents[], discoveries[],
+  distinct_verified, tier_histogram, totals{llm_calls, tokens_in,
+  tokens_out, qi_thinking, qi_surcharges}}` plus a Markdown twin; unlike
+  the Phase-0 layout (§3) it carries no `wall_ms` — the only
+  non-deterministic number is printed by the CLI table and never written
+  to a run directory.
 
 ## 9. Deviations from PLAN.md §3 (recorded, deliberate)
 
