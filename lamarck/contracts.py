@@ -68,12 +68,14 @@ REST's surcharge. Unaffordable actions degrade exactly as in Phase 0.
 
 Live action args (validated; invalid args take the retry path, unaffordable
 takes the degrade path):
-  EXPERIMENT {"task_id", "steps": [[a, b], ...]}  — stones surcharge
-      materials[tier-1]; outcome recorded as a TASK_ATTEMPT event (world-
-      emitted, actor = agent, zero deltas) with step-product evidence;
-      verified success appends LEDGER_ADJUST {"reason": "bounty", "tier"}
-      crediting bounties[tier-1], multiplied by
-      economy.first_discovery_multiplier when first-in-world.
+  EXPERIMENT {"steps": [[a, b], ...]}  — steps only (auto-claim, 2026-08-05:
+      no task_id, no upfront materials charge, stones_delta 0); outcome
+      recorded as a TASK_ATTEMPT event (world-emitted, actor = agent, zero
+      deltas) {steps, step_products, message, claims: [{task_id, tier,
+      first}]}; each claim appends LEDGER_ADJUST {"reason": "bounty",
+      "task_id", "tier", "first"} crediting bounties[tier-1] × (live.
+      first_discovery_multiplier when first-in-world) − materials[tier-1]
+      (materials are paid on delivery; see CraftResult below).
   CONVERSE {"target", "text"}  — open-air speech: heard by every agent
       co-located with the speaker at emission (target is addressing flavor).
       An agent's perception carries the up-to-6 most recent utterances from

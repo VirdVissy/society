@@ -34,9 +34,15 @@ _CONFIGS = Path(__file__).resolve().parent.parent / "configs"
 WORLD_TOML = _CONFIGS / "world.toml"
 VALLEY_TOML = _CONFIGS / "valley.toml"
 
-# Pinned 2026-07-23 (computed once, then frozen — see module docstring).
+# Pinned once and frozen (see module docstring); a pin moves only in a commit
+# that changes the config or the fingerprinted schema. History: world.toml
+# 2026-07-23; valley.toml 2026-07-23 → 2026-07-27 (free tier-1 materials) →
+# 2026-08-18 (wave_concurrency joined the fingerprint); valley-cloud.toml
+# 2026-09-06 (the sha recorded in the Phase-1 acceptance run aea04d1a8e6f).
 PHASE0_WORLD_CONFIG_SHA = "24cbbf0eaf5426eb509b8bd1b755c18877e4e9822644e180bc85dd72aa5c66cb"
 VALLEY_LIVE_CONFIG_SHA = "f4585137549372f74615e3e063ba0b85db810be04da28faba4dd2ade503638d3"
+VALLEY_CLOUD_TOML = _CONFIGS / "valley-cloud.toml"
+VALLEY_CLOUD_LIVE_CONFIG_SHA = "6327b67a3a2578479c208f4fa9f2ae0d2610d48023f613ca681decd5782a15d3"
 
 
 def _variant(tmp_path: Path, transform: Callable[[str], str]) -> Path:
@@ -271,3 +277,12 @@ def test_missing_live_section_is_validation_error(tmp_path: Path) -> None:
     )
     with pytest.raises(ValidationError):
         load_live_config(path)
+
+
+def test_valley_cloud_live_config_sha_pinned() -> None:
+    """The paid config is fingerprinted too: this is the sha recorded in every
+    cloud run's RUN_STARTED (incl. the Phase-1 acceptance run). It differs from
+    VALLEY_LIVE_CONFIG_SHA only because ``wave_concurrency = 8`` is
+    fingerprinted; any world retune (Phase 2 ``qi_max``) re-pins it on purpose."""
+    assert live_config_sha(load_live_config(VALLEY_CLOUD_TOML)) == VALLEY_CLOUD_LIVE_CONFIG_SHA
+    assert VALLEY_CLOUD_LIVE_CONFIG_SHA != VALLEY_LIVE_CONFIG_SHA

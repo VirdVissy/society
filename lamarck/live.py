@@ -95,12 +95,13 @@ COGNITION LOOP (one ACTION slot; every payload key set pinned here)
    forfeits immediately. A second failure forfeits: ACTION
    ``{type: "rest", degraded: true, reason: "malformed"}`` billing REST's
    surcharge (same free-rest fallback).
-6. On success, the affordability funnel EXACTLY as the stub — (a) allowance
-   must fit ``action_costs[type]``, (b) experiment stones must cover
-   ``materials[tier-1]`` — degrading to ACTION ``{type: "rest", degraded:
-   true, wanted: {type, **args}}`` otherwise. Affordable actions commit as
-   ACTION ``{type, **args}`` with ``qi_delta = -cost`` and ``stones_delta``
-   = ``-materials[tier-1]`` (experiment) / ``-stones`` (trade) / 0.
+6. On success, the affordability funnel: the allowance must fit
+   ``action_costs[type]``, else the action degrades to ACTION ``{type:
+   "rest", degraded: true, wanted: {type, **args}}``. Since auto-claim
+   (item 7) experiments carry NO upfront materials charge — materials are
+   netted out of the bounty on delivery — so stones never gate an
+   experiment. Affordable actions commit as ACTION ``{type, **args}`` with
+   ``qi_delta = -cost`` and ``stones_delta`` = ``-stones`` (trade) / 0.
 7. Post-action, world-emitted events (actor = agent):
    - experiment (AUTO-CLAIM, 2026-08-06): ``universe.craft`` then
      TASK_ATTEMPT ``{steps, step_products, message, claims: [{task_id,
