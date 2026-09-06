@@ -10,6 +10,7 @@ definition changed — a contract break, never a refactor.
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -405,6 +406,9 @@ def test_wall_ts_is_never_hashed(tmp_path: Path) -> None:
 # --------------------------------------------------------------------- perf
 
 
+PERF_APPEND_BUDGET_S = 2.0 * (3.0 if os.environ.get("CI") else 1.0)  # CI runners are 2–3× slower
+
+
 def test_perf_smoke_20k_batched_appends_under_2s(tmp_path: Path) -> None:
     store = EventStore(tmp_path / "perf.db")
     n = 20_000
@@ -425,6 +429,8 @@ def test_perf_smoke_20k_batched_appends_under_2s(tmp_path: Path) -> None:
             store.append(d)
     elapsed = time.perf_counter() - start
     assert store.head()[0] == n - 1
-    assert elapsed < 2.0, f"{n} batched appends took {elapsed:.3f}s"
+    assert elapsed < PERF_APPEND_BUDGET_S, (
+        f"{n} batched appends took {elapsed:.3f}s (budget {PERF_APPEND_BUDGET_S}s)"
+    )
     assert store.verify_chain() == store.head()
     store.close()
