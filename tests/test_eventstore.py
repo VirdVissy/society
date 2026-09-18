@@ -434,3 +434,49 @@ def test_perf_smoke_20k_batched_appends_under_2s(tmp_path: Path) -> None:
     )
     assert store.verify_chain() == store.head()
     store.close()
+
+
+# ------------------------------------------------------------ read-only open
+
+
+def _sidecars(db: Path) -> list[str]:
+    return sorted(p.name for p in db.parent.iterdir() if p.name.startswith(db.name + "-"))
+
+
+def test_readonly_open_reads_everything_and_refuses_writes(tmp_path: Path) -> None:
+    db = tmp_path / "events.sqlite3"
+    with EventStore(db) as store:
+        for draft in _fixture_drafts():
+            store.append(draft)
+        head = store.head()
+    assert _sidecars(db) == []  # checkpointed on close: no -wal/-shm left behind
+    with EventStore(db, readonly=True) as ro:
+        assert [ev.seq for ev in ro.scan()] == [0, 1, 2]
+        assert ro.head() == head
+        assert ro.verify_chain() == head
+        with pytest.raises(LamarckAssertionError, match="read-only"):
+            ro.append(_fixture_drafts()[0])
+        with pytest.raises(LamarckAssertionError, match="read-only"), ro.batch():
+            pass
+    # immutable open created nothing next to the log
+    assert _sidecars(db) == []
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["events.sqlite3"]
+
+
+def test_readonly_open_sees_a_live_wal_tail(tmp_path: Path) -> None:
+    db = tmp_path / "events.sqlite3"
+    writer = EventStore(db)
+    drafts = _fixture_drafts()
+    writer.append(drafts[0])
+    writer.append(drafts[1])
+    assert "events.sqlite3-wal" in _sidecars(db)  # writer still open: WAL is live
+    with EventStore(db, readonly=True) as ro:  # falls back to mode=ro
+        assert [ev.seq for ev in ro.scan()] == [0, 1]
+    writer.close()
+
+
+def test_readonly_open_needs_an_existing_log(tmp_path: Path) -> None:
+    missing = tmp_path / "nope" / "events.sqlite3"
+    with pytest.raises(LamarckAssertionError, match="read-only open needs an event log"):
+        EventStore(missing, readonly=True)
+    assert not (tmp_path / "nope").exists()  # nothing was created

@@ -277,7 +277,7 @@ def write_report(run_dir: str | Path) -> Path:
     ``report.json`` path. Pure fold of the event log — deterministic and
     byte-identical across re-writes (see module docstring)."""
     rd = Path(run_dir)
-    with EventStore(rd / "events.sqlite3") as store:
+    with EventStore(rd / "events.sqlite3", readonly=True) as store:
         events = list(store.scan())
     data = _fold_report(events)
     json_path = rd / "report.json"

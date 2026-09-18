@@ -17,6 +17,11 @@ Layout (contracts: "HASH CHAIN"):
 
 Discipline:
 
+- ``EventStore(path, readonly=True)`` is the analysis/replay-reader path: it
+  opens an existing log without creating anything (``immutable=1`` when the
+  log is checkpointed, ``mode=ro`` when a WAL sidecar is live), never issues
+  a PRAGMA or the schema DDL, and refuses ``append``/``batch``. Readers of
+  finished runs MUST use it so the run directory stays byte-identical.
 - One long-lived connection per store; WAL journal, ``synchronous=NORMAL``.
   Single writer: ``batch()`` is not reentrant (LMK_ASSERT), and the
   connection rejects cross-thread use (sqlite3 default).
@@ -101,19 +106,32 @@ class EventStore:
     unsupported (the constructor asserts the journal mode took effect).
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, readonly: bool = False) -> None:
         self._path = Path(path)
-        conn = sqlite3.connect(self._path, isolation_level=None)  # autocommit; batch() BEGINs
+        self._readonly = readonly
+        if readonly:
+            # Analysis path (2026-09-18): never touch the run's ground truth.
+            # A checkpointed log (no -wal sidecar) opens ``immutable=1`` — no
+            # journal, no locks, no -shm/-wal files created; a log with a live
+            # WAL opens ``mode=ro`` so the committed tail is visible. No
+            # PRAGMA, no schema creation: a missing file or table is an error.
+            LMK_ASSERT(self._path.is_file(), "read-only open needs an event log", path=str(path))
+            wal = self._path.with_name(self._path.name + "-wal")
+            query = "mode=ro" if wal.is_file() else "immutable=1"
+            uri = f"{self._path.resolve().as_uri()}?{query}"
+            conn = sqlite3.connect(uri, uri=True, isolation_level=None)
+        else:
+            conn = sqlite3.connect(self._path, isolation_level=None)  # autocommit; batch() BEGINs
+            mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+            LMK_ASSERT(
+                str(mode).lower() == "wal",
+                "WAL journal mode did not take effect",
+                path=str(self._path),
+                mode=mode,
+            )
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute(_SCHEMA_SQL)
         self._conn: sqlite3.Connection | None = conn
-        mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
-        LMK_ASSERT(
-            str(mode).lower() == "wal",
-            "WAL journal mode did not take effect",
-            path=str(self._path),
-            mode=mode,
-        )
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute(_SCHEMA_SQL)
         self._in_batch = False
         row = conn.execute("SELECT COUNT(*), MIN(seq), MAX(seq) FROM events").fetchone()
         count, min_seq, max_seq = int(row[0]), row[1], row[2]
@@ -168,6 +186,7 @@ class EventStore:
         the canonical-JSON domain — e.g. contains a float.
         """
         conn = self._require_open()
+        LMK_ASSERT(not self._readonly, "append() on a read-only store", path=str(self._path))
         seq = self._last_seq + 1
         actor = unicodedata.normalize("NFC", draft.actor)
         kind = draft.kind.value
@@ -221,6 +240,7 @@ class EventStore:
         discipline).
         """
         conn = self._require_open()
+        LMK_ASSERT(not self._readonly, "batch() on a read-only store", path=str(self._path))
         LMK_ASSERT(not self._in_batch, "batch() is not reentrant", path=str(self._path))
         saved_head = (self._last_seq, self._last_hash)
         conn.execute("BEGIN")
