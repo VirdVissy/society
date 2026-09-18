@@ -6,6 +6,17 @@ hashed into every run's RUN_STARTED; see README).
 
 ## Unreleased
 
+- feat(analysis): Phase-2 Stage 0 — `lamarck exposure|lifespan|retread`:
+  the recipe-exposure/attribution prototype (connector-joined pair rule,
+  uptake vs control, acquisition classes, misinformation), the
+  death/succession schedule simulator with founder stagger and canary
+  checks, and pair-level own-journal retread + call-truncation statistics;
+  Phase-1 baselines pinned on the accepted run.
+- feat(eventstore): `EventStore(path, readonly=True)` — analysis readers open
+  a run's log without creating anything (immutable/ro URI), refuse writes.
+- docs: Phase-2 plan v2 after the 64-point review (`docs/plans/`), the
+  point-by-point ledger, devlog 002 errata (retread is amnesia not
+  saturation; truncation sets lifespan; unmarked teaching; misinformation).
 - ci: the two wall-clock test budgets are widened 3× when `CI` is set — the
   ubuntu-latest leg had been red since 2026-08-05 on shared-runner speed alone.
 - docs: post-close status review (2026-09-06) — devlog 002 errata (qi

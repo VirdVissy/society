@@ -283,3 +283,45 @@ kept here so the history stays honest.
 - **Wall time.** The passing run's segments span 11.8 + 26.9 = 38.7 min of
   wall-clock; the log's "wall ms 1611572" covers only the resumed segment
   (`resume_live` starts its own timer).
+
+## Errata (2026-09-18, from the Phase-2 plan review — measured by `lamarck retread`)
+
+- **The 61% retread rate is amnesia, not frontier saturation.** The
+  acceptance bullet above attributes the residual retread to "frontier
+  saturation, not amnesia". A pair-level fold of the same log
+  (`lamarck/analysis/retread.py`) shows 1,210 of the 1,980 executed
+  experiment steps (611‰) re-tried a pair already in the actor's own journal,
+  and **1,161 of those 1,210 were pairs the journal listed as slag**; 508 of
+  the 872 non-empty attempts contained no novel pair at all. Ruo Zhi retried
+  earth + lacquer-salt 35 times after first recording it as slag, Bo Shan
+  lacquer-salt + water 27 times. The journal's dead-ends line is rendered
+  but not read. Phase 2 measures own-journal slag retread per life-day as a
+  locked metric with this run as the baseline; a world rule that refuses or
+  prices a known-slag repeat is recorded as a later-phase candidate.
+- **Lifespan is set by truncation, not by thinking.** Of 1,920 actions,
+  1,803 (939‰) incurred a billed retry, 1,801 of them because the first
+  reply hit `max_tokens = 220`; 2,311,267 of 4,933,921 thinking qi (468‰)
+  went to those truncated first calls. Dusk reflections were truncated 233
+  times out of 240 at `reflection_max_tokens = 160`. The "1,803 billed
+  retries (1,531 recovered)" figure above is consistent; this erratum records
+  its cause. Per-agent qi per day tracks mean prompt length (Yan Hua 19,012
+  at 3,707 input tokens per call; Bo Shan 24,151 at 4,916), so lifespan is
+  a function of prompt size and the Phase-2 retune follows the `max_tokens`
+  decision (plan v2, D10).
+- **Teaching was already happening, unmarked.** `lamarck exposure` (the
+  Phase-2 attribution prototype) finds that 169 of the 567 utterances name
+  an ingredient pair the speaker had already produced (84 also name the
+  product), that 21 of the 24 discovered recipes were spoken in full, and
+  that a listener who had never tried a mentioned pair first-tried it within
+  two days 29% of the time against 6% for untried makeable pairs nobody
+  mentioned. Of the 105 non-first acquisitions, 51 followed such an
+  exposure and 54 were independent; Mei Lin, Fen Tu and Han Yue were the
+  leading transmitters. Zero TEACH actions were ever chosen. The devlog's
+  "TEACH/STUDY … billed flavor no-ops until their phases arrive" stands;
+  what this erratum adds is that the culture Phase 2 is designed to measure
+  was present in Phase 1 and can be attributed from the log alone.
+- **Recipe misinformation replicated.** 15 of 191 declarative recipe
+  assertions in speech and 11 of 64 in notes were false; 6 were repeated by
+  another agent within three days. On day 28 Han Yue asserted a measured
+  result for a pair whose only attempt (day 27) yielded slag; Mei Lin echoed
+  it twice and two other agents burned six experiments on it.
