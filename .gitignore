@@ -17,3 +17,6 @@ runs/
 .claude/
 .DS_Store
 dist/
+
+# editor
+.vscode/

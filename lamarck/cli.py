@@ -411,6 +411,121 @@ def audit(
 
 
 @app.command()
+def exposure(
+    run_dir: Annotated[
+        Path,
+        typer.Argument(help="Run directory holding events.sqlite3 (read-only)."),
+    ],
+    window_days: Annotated[
+        int, typer.Option("--window-days", help="Uptake/attribution window in sim-days.")
+    ] = 2,
+    pair_rule: Annotated[
+        str,
+        typer.Option("--pair-rule", help="'connected' (frozen Phase-2 rule) or 'sentence'."),
+    ] = "connected",
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Output path (default RUN_DIR/exposure.json).")
+    ] = None,
+) -> None:
+    """Recipe exposure, uptake, acquisition classes and misinformation ($0)."""
+    if not (run_dir / "events.sqlite3").is_file():
+        _err.print(f"[red]error:[/red] no events.sqlite3 in {run_dir}")
+        raise typer.Exit(code=2)
+    if pair_rule not in ("connected", "sentence"):
+        _err.print(
+            f"[red]error:[/red] --pair-rule must be 'connected' or 'sentence', not {pair_rule!r}"
+        )
+        raise typer.Exit(code=2)
+    from lamarck.analysis.exposure import write_exposure
+
+    path = write_exposure(
+        run_dir,
+        out_path=out,
+        window_days=window_days,
+        pair_rule="sentence" if pair_rule == "sentence" else "connected",
+    )
+    _out.print(f"wrote {path}")
+
+
+@app.command()
+def lifespan(
+    run_dir: Annotated[
+        Path,
+        typer.Argument(help="Run directory holding events.sqlite3 (read-only)."),
+    ],
+    qi_max: Annotated[
+        list[int],
+        typer.Option("--qi-max", help="Candidate qi_max (repeatable)."),
+    ],
+    days: Annotated[int, typer.Option("--days", help="Days to simulate.")] = 30,
+    stagger: Annotated[
+        str | None,
+        typer.Option(
+            "--stagger",
+            help="Founder start-qi stagger: 'uniform:LO:HI' (permille, needs --stagger-seed) "
+            "or a comma list of permille, one per founder.",
+        ),
+    ] = None,
+    stagger_seed: Annotated[
+        int | None, typer.Option("--stagger-seed", help="Seed for uniform stagger.")
+    ] = None,
+    arm_days: Annotated[
+        int | None, typer.Option("--arm-days", help="Attach a canary check for this arm length.")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Output path (default RUN_DIR/lifespan.json).")
+    ] = None,
+) -> None:
+    """Simulate death/succession schedules from a run's measured spend ($0)."""
+    if not (run_dir / "events.sqlite3").is_file():
+        _err.print(f"[red]error:[/red] no events.sqlite3 in {run_dir}")
+        raise typer.Exit(code=2)
+    from lamarck.analysis.lifespan import write_lifespan
+
+    spec: list[int] | tuple[str, int, int] | None = None
+    if stagger is not None:
+        parts = stagger.split(":")
+        if parts[0] == "uniform" and len(parts) == 3:
+            spec = ("uniform", int(parts[1]), int(parts[2]))
+        else:
+            spec = [int(x) for x in stagger.split(",")]
+    try:
+        path = write_lifespan(
+            run_dir,
+            list(qi_max),
+            days,
+            stagger=spec,
+            stagger_seed=stagger_seed,
+            arm_days=arm_days,
+            out_path=out,
+        )
+    except (ValueError, FileNotFoundError) as err:
+        _err.print(f"[red]error:[/red] {err}")
+        raise typer.Exit(code=1) from err
+    _out.print(f"wrote {path}")
+
+
+@app.command()
+def retread(
+    run_dir: Annotated[
+        Path,
+        typer.Argument(help="Run directory holding events.sqlite3 (read-only)."),
+    ],
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Output path (default RUN_DIR/retread.json).")
+    ] = None,
+) -> None:
+    """Pair-level own-journal retread and call-truncation statistics ($0)."""
+    if not (run_dir / "events.sqlite3").is_file():
+        _err.print(f"[red]error:[/red] no events.sqlite3 in {run_dir}")
+        raise typer.Exit(code=2)
+    from lamarck.analysis.retread import write_retread
+
+    path = write_retread(run_dir, out_path=out)
+    _out.print(f"wrote {path}")
+
+
+@app.command()
 def report(
     run_dir: Annotated[
         Path,
