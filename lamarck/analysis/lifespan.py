@@ -415,10 +415,28 @@ def simulate(
 
 
 def canary_check(
-    sim: dict[str, Any], arm_days: int, *, min_deaths: int = 1, min_generation: int = 2
+    sim: dict[str, Any],
+    arm_days: int,
+    *,
+    min_deaths: int = 1,
+    min_generation: int = 2,
+    deaths_by_day: tuple[int, int] | None = None,
+    min_spread: int | None = None,
+    min_successor_days: int | None = None,
+    min_overlap_days: int | None = None,
+    generation_half_by_day: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     """Canary bars for an arm of ``arm_days`` days over a ``simulate`` result
-    (see module docstring, "canary_check"); no re-simulation."""
+    (see module docstring, "canary_check"); no re-simulation.
+
+    Optional schedule bars (each adds a reason when unmet), all in the
+    simulator's 0-indexed day units: ``deaths_by_day=(day, n)`` requires at
+    least ``n`` deaths on days ``0..day``; ``min_spread`` bounds the
+    generation-1 first-to-last death spread from below;
+    ``min_successor_days`` bounds ``successors_acting_days``;
+    ``min_overlap_days`` bounds ``heir_agent_days_with_teacher`` for the
+    generation 1 -> 2 pair; ``generation_half_by_day=(g, day)`` requires half
+    the lineages to have reached generation ``g`` by ``day``."""
     days = int(sim["days"])
     if not 1 <= arm_days <= days:
         raise ValueError(f"arm_days must be within 1..{days}, got {arm_days}")
@@ -441,20 +459,53 @@ def canary_check(
         for r in reached
         if r["first_day_half"] is not None and r["first_day_half"] <= last
     )
+    spread_raw = population["spread"]
+    spread = None if spread_raw is None else int(spread_raw)
+    overlap_1_2 = 0
+    for row in population["overlap"]["cross_lineage"]:
+        if int(row["generation"]) == 1:
+            overlap_1_2 = int(row["heir_agent_days_with_teacher"])
+    half_days = {int(r["generation"]): r["first_day_half"] for r in reached}
     reasons: list[str] = []
     if deaths_within_arm < min_deaths:
         reasons.append(f"deaths_within_arm {deaths_within_arm} < min_deaths {min_deaths}")
     if by_any < min_generation:
         reasons.append(f"generation_reached_by_arm_end {by_any} < min_generation {min_generation}")
+    deaths_by_limit: int | None = None
+    if deaths_by_day is not None:
+        limit_day, needed = deaths_by_day
+        deaths_by_limit = sum(
+            int(d) for d in population["deaths_by_day"][: min(limit_day, last) + 1]
+        )
+        if deaths_by_limit < needed:
+            reasons.append(f"deaths_by_day {limit_day}: {deaths_by_limit} < {needed}")
+    if min_spread is not None and (spread is None or spread < min_spread):
+        reasons.append(f"spread {spread} < min_spread {min_spread}")
+    if min_successor_days is not None and successors_acting_days < min_successor_days:
+        reasons.append(
+            f"successors_acting_days {successors_acting_days} < min_successor_days "
+            f"{min_successor_days}"
+        )
+    if min_overlap_days is not None and overlap_1_2 < min_overlap_days:
+        reasons.append(f"overlap_heir_days_1_2 {overlap_1_2} < min_overlap_days {min_overlap_days}")
+    if generation_half_by_day is not None:
+        g, by_day = generation_half_by_day
+        reached_day = half_days.get(g)
+        if reached_day is None or int(reached_day) > min(by_day, last):
+            reasons.append(f"generation {g} by half not reached by day {by_day} ({reached_day})")
     return {
         "arm_days": arm_days,
         "min_deaths": min_deaths,
         "min_generation": min_generation,
         "deaths_within_arm": deaths_within_arm,
+        "deaths_by_day_limit": deaths_by_limit,
+        "spread": spread,
         "successors_born": successors_born,
         "successors_acting_days": successors_acting_days,
+        "overlap_heir_days_1_2": overlap_1_2,
         "generation_reached_by_arm_end": by_any,
         "generation_reached_by_half_by_arm_end": by_half,
+        "first_day_half_by_generation": {str(g): d for g, d in sorted(half_days.items())},
         "passes": not reasons,
         "reasons": reasons,
     }

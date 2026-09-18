@@ -27,9 +27,11 @@ R1 Recipe truth. Fold every TASK_ATTEMPT: for each executed step i with
      satchel equal ``WorldStateFold``'s on a scripted run.
 
 R2 Sentence split: split utterance/note text on any of . ! ? ; : and newline;
-   a sentence "names pair (a,b)" iff it contains both names, where base names
-   match word-bounded (regex \\b) case-insensitively and compound names match
-   as whole hyphenated tokens (word-bounded too); "names product t" iff it
+   mentions: base names match word-bounded (regex \\b) case-insensitively and
+   compound names match as whole hyphenated tokens (word-bounded too); which
+   mentions form a NAMED PAIR is R3's PAIR RULE ("connected" is operative —
+   the brief's original "contains both names" wording is the "sentence"
+   reading, kept only for comparison); "names product t" iff the sentence
    also contains t.
    - the terminator stays attached to its sentence (so R6's '?' exclusion is
      meaningful); sentences are stripped, empties dropped;
@@ -181,7 +183,7 @@ from typing import Any, Literal, NamedTuple, cast, get_args
 
 from lamarck.contracts import EventKind, EventRecord, LiveWorldConfig
 from lamarck.engine import load_live_config
-from lamarck.eventstore import EventStore
+from lamarck.eventstore import EventStore, readonly_uri
 from lamarck.universes import WuxingUniverse
 from lamarck.universes.wuxing import BASES, SLAG
 
@@ -1055,7 +1057,12 @@ def _summarize_acquisitions(st: _State) -> dict[str, Any]:
                     "production_day": acq.production_day,
                 }
             )
+    lag: dict[str, int] = {}
+    for row in transmitted:
+        key = str(int(row["production_day"]) - int(row["utterance_day"]))
+        lag[key] = lag.get(key, 0) + 1
     return {
+        "lag_histogram": {k: lag[k] for k in sorted(lag, key=int)},
         "by_tier": {k: by_tier[k] for k in sorted(by_tier, key=int)},
         "transmitted": transmitted,
     }
@@ -1183,9 +1190,7 @@ def _load_prompts(db_path: Path) -> dict[int, str] | None:
     when a WAL is live; never a pragma or a schema statement (``TextsStore``
     would CREATE TABLE and leave an empty table behind on a run without
     prompts). Mirrors ``EventStore(readonly=True)``."""
-    wal = db_path.with_name(db_path.name + "-wal")
-    query = "mode=ro" if wal.is_file() else "immutable=1"
-    conn = sqlite3.connect(f"{db_path.resolve().as_uri()}?{query}", uri=True)
+    conn = sqlite3.connect(readonly_uri(db_path), uri=True)
     try:
         present = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'llm_texts'"

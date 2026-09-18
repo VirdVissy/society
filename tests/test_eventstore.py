@@ -19,7 +19,7 @@ import pytest
 
 from lamarck.asserts import LamarckAssertionError
 from lamarck.contracts import GENESIS_HASH, EventDraft, EventKind, EventStoreP
-from lamarck.eventstore import CanonicalError, EventStore, canonical_bytes
+from lamarck.eventstore import CanonicalError, EventStore, canonical_bytes, readonly_uri
 
 # ----------------------------------------------------------- 3-event fixture
 
@@ -480,3 +480,12 @@ def test_readonly_open_needs_an_existing_log(tmp_path: Path) -> None:
     with pytest.raises(LamarckAssertionError, match="read-only open needs an event log"):
         EventStore(missing, readonly=True)
     assert not (tmp_path / "nope").exists()  # nothing was created
+
+
+def test_readonly_uri_picks_immutable_unless_a_wal_is_live(tmp_path: Path) -> None:
+    db = tmp_path / "events.sqlite3"
+    db.write_bytes(b"")
+    assert readonly_uri(db).endswith("?immutable=1")
+    (tmp_path / "events.sqlite3-wal").write_bytes(b"")
+    assert readonly_uri(db).endswith("?mode=ro")
+    assert readonly_uri(db).startswith("file://")

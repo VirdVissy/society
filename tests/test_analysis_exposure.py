@@ -33,6 +33,7 @@ from lamarck.analysis.exposure import (
     PairRule,
     Production,
     RecipeNames,
+    _connected_pairs,
     classify_acquisitions,
     exposure_records,
     find_assertions,
@@ -887,6 +888,7 @@ class TestAdversarial:
         }
         # a2 was first in the world; a1 heard nothing before producing.
         assert data["acquisitions"] == {
+            "lag_histogram": {},
             "by_tier": {"1": {"first_in_world": 1, "transmitted": 0, "independent": 1}},
             "transmitted": [],
         }
@@ -1409,6 +1411,7 @@ def test_accepted_run_pins(tmp_path: Path) -> None:
         "5": (14, 0, 0),
     }
     assert connected["control"]["uptake_permille"] == 63
+    assert connected["acquisitions"]["lag_histogram"] == {"0": 8, "1": 23, "2": 20}
     acq = connected["acquisitions"]["by_tier"]
     totals = {
         k: sum(acq[t][k] for t in acq) for k in ("first_in_world", "transmitted", "independent")
@@ -1429,3 +1432,16 @@ def test_accepted_run_pins(tmp_path: Path) -> None:
     sacq = sentence["acquisitions"]["by_tier"]
     assert sum(sacq[t]["transmitted"] for t in sacq) == 57
     assert not (ACCEPTED_RUN / "c.json").exists() and not (ACCEPTED_RUN / "exposure.json").exists()
+
+
+def test_bare_whitespace_is_not_a_pair_connector() -> None:
+    """D1: 'fire metal' names nothing; only a connector token joins a pair."""
+    names = RecipeNames(bases=frozenset(BASES), compounds=frozenset({"silt-ash"}), tiers={})
+    matcher = NameMatcher(names)
+    assert (
+        _connected_pairs("fire metal gave silt-ash.", matcher.mentions("fire metal gave silt-ash."))
+        == []
+    )
+    assert _connected_pairs(
+        "fire and metal gave silt-ash.", matcher.mentions("fire and metal gave silt-ash.")
+    ) == [("fire", "metal")]

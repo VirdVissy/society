@@ -343,10 +343,14 @@ def test_canary_passes_when_a_death_and_a_successor_fit_the_arm(sim_1):
         "min_deaths": 1,
         "min_generation": 2,
         "deaths_within_arm": 2,
+        "deaths_by_day_limit": None,
+        "spread": 1,
         "successors_born": 1,
         "successors_acting_days": 1,
+        "overlap_heir_days_1_2": 1,
         "generation_reached_by_arm_end": 2,
         "generation_reached_by_half_by_arm_end": 2,
+        "first_day_half_by_generation": {"1": 0, "2": 3, "3": 6, "4": 9},
         "passes": True,
         "reasons": [],
     }
@@ -694,12 +698,34 @@ def test_accepted_run_schedule_pins() -> None:
     assert stag200["stagger_permille"] == [668, 891, 991, 632, 730, 660, 853, 989]
     assert founder_deaths(stag200) == [7, 8, 11, 6, 8, 6, 8, 10]
     assert gen_half(stag200, 3) == 20
-    assert canary_check(stag200, 14, min_deaths=1, min_generation=2)["passes"] is True
+    # E2 generational canary bars exactly as plan v2 states them (0-indexed days).
+    e2 = canary_check(
+        stag200,
+        14,
+        min_deaths=7,
+        min_generation=2,
+        min_overlap_days=15,
+        generation_half_by_day=(2, 10),
+    )
+    assert (e2["passes"], e2["deaths_within_arm"], e2["successors_acting_days"]) == (True, 8, 40)
+    assert (e2["overlap_heir_days_1_2"], e2["first_day_half_by_generation"]["2"]) == (24, 9)
     stag70 = simulate(spend, 70_000, 30, stagger=("uniform", 600, 1000), stagger_seed=1)
     assert founder_deaths(stag70) == [2, 3, 4, 2, 3, 2, 3, 4]
-    smoke = canary_check(stag70, 8, min_deaths=1, min_generation=2)
+    # E1 smoke rung bars exactly as plan v2 states them.
+    smoke = canary_check(
+        stag70,
+        8,
+        min_deaths=1,
+        min_generation=2,
+        deaths_by_day=(5, 8),
+        min_spread=1,
+        min_successor_days=20,
+    )
     assert (smoke["passes"], smoke["deaths_within_arm"], smoke["successors_acting_days"]) == (
         True,
         13,
         33,
     )
+    assert (smoke["deaths_by_day_limit"], smoke["spread"]) == (8, 2)
+    failing = canary_check(stag70, 8, min_spread=3, generation_half_by_day=(3, 7))
+    assert failing["passes"] is False and len(failing["reasons"]) == 2

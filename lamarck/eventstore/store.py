@@ -18,9 +18,12 @@ Layout (contracts: "HASH CHAIN"):
 Discipline:
 
 - ``EventStore(path, readonly=True)`` is the analysis/replay-reader path: it
-  opens an existing log without creating anything (``immutable=1`` when the
-  log is checkpointed, ``mode=ro`` when a WAL sidecar is live), never issues
-  a PRAGMA or the schema DDL, and refuses ``append``/``batch``. Readers of
+  opens an existing log through ``readonly_uri`` without creating anything
+  (``immutable=1`` when the log is checkpointed, ``mode=ro`` when a WAL
+  sidecar is live — then SQLite may create a missing ``-shm``), never issues
+  a PRAGMA or the schema DDL, and refuses ``append``/``batch``. The head is
+  snapshotted at open: a read-only store is for finished logs (a writer
+  committing afterwards would make ``scan`` outrun ``head``). Readers of
   finished runs MUST use it so the run directory stays byte-identical.
 - One long-lived connection per store; WAL journal, ``synchronous=NORMAL``.
   Single writer: ``batch()`` is not reentrant (LMK_ASSERT), and the
@@ -99,6 +102,22 @@ def _record_from_row(row: tuple[Any, ...]) -> EventRecord:
     )
 
 
+def readonly_uri(path: str | Path) -> str:
+    """The one read-only SQLite URI rule for finished or live logs.
+
+    ``immutable=1`` when the log is checkpointed (no ``-wal`` sidecar): no
+    journal, no locks, nothing created next to the file. ``mode=ro`` when a
+    WAL sidecar is live so the committed tail is visible (SQLite may then
+    create the ``-shm`` index if it is missing). Shared by
+    ``EventStore(readonly=True)``, the analysis prompt loader and the
+    provenance builder — never re-implement the choice.
+    """
+    p = Path(path)
+    wal = p.with_name(p.name + "-wal")
+    query = "mode=ro" if wal.is_file() else "immutable=1"
+    return f"{p.resolve().as_uri()}?{query}"
+
+
 class EventStore:
     """contracts.EventStoreP implementation (structural). See module docstring.
 
@@ -116,10 +135,7 @@ class EventStore:
             # WAL opens ``mode=ro`` so the committed tail is visible. No
             # PRAGMA, no schema creation: a missing file or table is an error.
             LMK_ASSERT(self._path.is_file(), "read-only open needs an event log", path=str(path))
-            wal = self._path.with_name(self._path.name + "-wal")
-            query = "mode=ro" if wal.is_file() else "immutable=1"
-            uri = f"{self._path.resolve().as_uri()}?{query}"
-            conn = sqlite3.connect(uri, uri=True, isolation_level=None)
+            conn = sqlite3.connect(readonly_uri(self._path), uri=True, isolation_level=None)
         else:
             conn = sqlite3.connect(self._path, isolation_level=None)  # autocommit; batch() BEGINs
             mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]

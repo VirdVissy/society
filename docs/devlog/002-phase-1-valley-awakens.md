@@ -284,7 +284,7 @@ kept here so the history stays honest.
   wall-clock; the log's "wall ms 1611572" covers only the resumed segment
   (`resume_live` starts its own timer).
 
-## Errata (2026-09-18, from the Phase-2 plan review — measured by `lamarck retread`)
+## Errata (2026-09-18, from the Phase-2 plan review — measured by `lamarck retread` and `lamarck exposure`)
 
 - **The 61% retread rate is amnesia, not frontier saturation.** The
   acceptance bullet above attributes the residual retread to "frontier
@@ -305,7 +305,7 @@ kept here so the history stays honest.
   times out of 240 at `reflection_max_tokens = 160`. The "1,803 billed
   retries (1,531 recovered)" figure above is consistent; this erratum records
   its cause. Per-agent qi per day tracks mean prompt length (Yan Hua 19,012
-  at 3,707 input tokens per call; Bo Shan 24,151 at 4,916), so lifespan is
+  at 3,707 input tokens per tick call; Bo Shan 24,150 at 4,915), so lifespan is
   a function of prompt size and the Phase-2 retune follows the `max_tokens`
   decision (plan v2, D10).
 - **Teaching was already happening, unmarked.** `lamarck exposure` (the
@@ -322,6 +322,8 @@ kept here so the history stays honest.
   was present in Phase 1 and can be attributed from the log alone.
 - **Recipe misinformation replicated.** 15 of 191 declarative recipe
   assertions in speech and 11 of 64 in notes were false; 6 were repeated by
-  another agent within three days. On day 28 Han Yue asserted a measured
-  result for a pair whose only attempt (day 27) yielded slag; Mei Lin echoed
-  it twice and two other agents burned six experiments on it.
+  another agent within three days. On day 27 Yan Hua asserted a measured
+  result for azure-coil + burnished-dew after his only attempt on the pair
+  had yielded slag; Han Yue repeated it twice on day 28 (two of the six
+  replications), and Qing Zhao and Bo Shan burned six experiments on the
+  pair.

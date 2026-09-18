@@ -9,7 +9,14 @@ Public API:
 """
 
 from lamarck.eventstore.canonical import CanonicalError, canonical_bytes, sha256_hex
-from lamarck.eventstore.store import EventStore
+from lamarck.eventstore.store import EventStore, readonly_uri
 from lamarck.eventstore.texts import TextsStore
 
-__all__ = ["CanonicalError", "EventStore", "TextsStore", "canonical_bytes", "sha256_hex"]
+__all__ = [
+    "CanonicalError",
+    "EventStore",
+    "TextsStore",
+    "canonical_bytes",
+    "readonly_uri",
+    "sha256_hex",
+]
